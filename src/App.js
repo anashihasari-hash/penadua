@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 export default function App() {
   // State RBAC & Otentikasi
   const [userRole, setUserRole] = useState('siswa'); // 'siswa' atau 'guru'
-  const [isGuruAuthed, setIsGuruAuthed] = useState(false); // Status Verifikasi PIN Guru
+  const [isGuruAuthed, setIsGuruAuthed] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
 
@@ -11,7 +11,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [selectedMode, setSelectedMode] = useState('mandiri');
 
-  // Form Kanvas
+  // State Form Kanvas Siswa
   const [formData, setFormData] = useState({
     studentName: '',
     problem: '',
@@ -20,38 +20,57 @@ export default function App() {
     deconstructionText: ''
   });
 
-  // Database Simulasi
+  // Database Simulasi Terintegrasi
   const [submissions, setSubmissions] = useState([
     {
       id: 1,
       studentName: 'Budi Santoso',
       mode: 'Modus Kelompok (Kelas)',
-      problem: 'Apakah AI bisa menggantikan peran guru sepenuhnya?',
+      problem: 'Apakah AI dapat menggantikan peran penalaran kritis manusia secara penuh dalam karya ilmiah?',
       ennis: 'Penjelasan Sederhana',
       polya: 'Memahami Masalah',
-      deconstructionText: 'AI hanya memproses pola data tanpa memiliki empati kognitif.',
+      deconstructionText: 'AI hanya memproses dataset teks berdasarkan probabilitas statistik tanpa memiliki kesadaran emosional, pertimbangan etis, maupun konteks nalar kritis mandiri.',
       diagnosis: 'Kritis & Mendalam',
-      aiNotes: 'Argumentasi logis dan sesuai indikator.',
+      aiNotes: 'Penguraian nalar siswa sangat terstruktur, logis, dan mampu mengidentifikasi limitasi substantif AI.',
       timestamp: '15/10/2026, 14:30',
-      status: 'Pending Review'
+      status: 'Pending Review',
+      teacherFeedback: ''
+    },
+    {
+      id: 2,
+      studentName: 'Siti Rahma',
+      mode: 'Modus Kelompok (Kelas)',
+      problem: 'AI adalah jawaban mutlak untuk menyelesaikan semua masalah matematika tanpa perlu koreksi.',
+      ennis: 'Menyimpulkan',
+      polya: 'Merencanakan Penyelesaian',
+      deconstructionText: 'AI langsung kasih rumus cepat jadi saya tinggal salin tempel saja.',
+      diagnosis: 'Permukaan / Terindikasi Instan (Ketergantungan AI)',
+      aiNotes: 'Jawaban sangat dangkal. Siswa tidak melakukan dekonstruksi langkah penyelesaian sama sekali.',
+      timestamp: '15/10/2026, 15:00',
+      status: 'Pending Review',
+      teacherFeedback: ''
     }
   ]);
 
   const [activePortfolio, setActivePortfolio] = useState(null);
 
-  // Minta Akses Guru dengan PIN (RBAC Security Check)
+  // State Modal Detail Peninjauan Guru
+  const [selectedSubmission, setSelectedSubmission] = useState(null);
+  const [showRevisionModal, setShowRevisionModal] = useState(false);
+  const [targetSubmissionId, setTargetSubmissionId] = useState(null);
+  const [teacherNoteInput, setTeacherNoteInput] = useState('');
+
+  // Handle Minta Akses Guru
   const handleRequestGuruAccess = () => {
     if (userRole === 'guru') {
-      // Kembali ke mode siswa
       setUserRole('siswa');
       setActiveTab('landing');
       return;
     }
-    // Jika masih siswa, tampilkan modal verifikasi PIN
     setShowPinModal(true);
   };
 
-  // Verifikasi PIN Rahasia Guru (Default: PENA2026)
+  // Verifikasi PIN Rahasia Guru
   const handleVerifyPin = (e) => {
     e.preventDefault();
     if (pinInput === 'PENA2026' || pinInput === '1234') {
@@ -60,7 +79,6 @@ export default function App() {
       setShowPinModal(false);
       setPinInput('');
       setActiveTab('guruDashboard');
-      alert('🔒 Otentikasi Guru Berhasil! Selamat Datang di Dashboard Guru.');
     } else {
       alert('❌ PIN Rahasia Guru Salah! Akses Ditolak.');
       setPinInput('');
@@ -82,6 +100,7 @@ export default function App() {
     setActiveTab('workspace');
   };
 
+  // Submit Kanvas Siswa
   const handleSubmitCanvas = (e) => {
     e.preventDefault();
     const length = formData.deconstructionText.trim().length;
@@ -89,9 +108,9 @@ export default function App() {
     let diagnosis = 'Kritis & Mendalam';
     let aiNotes = 'Penguraian nalar siswa terstruktur rapi berdasarkan indikator Ennis & Polya.';
 
-    if (length < 25) {
+    if (length < 30) {
       diagnosis = 'Permukaan / Terindikasi Instan (Ketergantungan AI)';
-      aiNotes = 'Jawaban terlalu singkat. Siswa terindikasi menyalin mentah jawaban AI.';
+      aiNotes = 'Jawaban terlalu singkat. Siswa terindikasi menyalin mentah jawaban AI tanpa analisis mendalam.';
     }
 
     const newSubmission = {
@@ -105,7 +124,8 @@ export default function App() {
       diagnosis: diagnosis,
       aiNotes: aiNotes,
       timestamp: new Date().toLocaleString(),
-      status: selectedMode === 'mandiri' ? 'Disetujui Otomatis (Mandiri)' : 'Pending Review'
+      status: selectedMode === 'mandiri' ? 'Disetujui Otomatis (Mandiri)' : 'Pending Review',
+      teacherFeedback: ''
     };
 
     setSubmissions([newSubmission, ...submissions]);
@@ -113,35 +133,89 @@ export default function App() {
     setActiveTab('portfolio');
   };
 
-  const handleTeacherAction = (id, newStatus) => {
+  // Guru Memberikan ACC
+  const handleApproveByTeacher = (id) => {
+    const defaultFeedback = 'Bagus! Pertanggungjawaban nalar sudah tepat dan memenuhi kaidah berpikir kritis.';
     setSubmissions(prev =>
-      prev.map(item => item.id === id ? { ...item, status: newStatus } : item)
+      prev.map(item => item.id === id ? { ...item, status: 'Disetujui Guru (ACC)', teacherFeedback: defaultFeedback } : item)
     );
+    if (selectedSubmission && selectedSubmission.id === id) {
+      setSelectedSubmission(prev => ({ ...prev, status: 'Disetujui Guru (ACC)', teacherFeedback: defaultFeedback }));
+    }
+    alert('✅ Tugas siswa berhasil disetujui (ACC)!');
   };
 
+  // Buka Modal Input Catatan Revisi oleh Guru
+  const handleOpenRevisionModal = (id) => {
+    setTargetSubmissionId(id);
+    setTeacherNoteInput('');
+    setShowRevisionModal(true);
+  };
+
+  // Simpan Catatan Revisi Guru
+  const handleSaveRevision = (e) => {
+    e.preventDefault();
+    if (!teacherNoteInput.trim()) {
+      alert('Mohon tuliskan alasan/catatan revisi agar siswa tahu bagian mana yang harus diperbaiki!');
+      return;
+    }
+
+    setSubmissions(prev =>
+      prev.map(item =>
+        item.id === targetSubmissionId
+          ? { ...item, status: 'Minta Revisi', teacherFeedback: teacherNoteInput }
+          : item
+      )
+    );
+
+    if (selectedSubmission && selectedSubmission.id === targetSubmissionId) {
+      setSelectedSubmission(prev => ({ ...prev, status: 'Minta Revisi', teacherFeedback: teacherNoteInput }));
+    }
+
+    setShowRevisionModal(false);
+    setTeacherNoteInput('');
+    alert('❌ Status diperbarui menjadi Minta Revisi. Catatan evaluasi telah terikirim ke siswa.');
+  };
+
+  // Unduh Sertifikat/Kartu Portofolio Teks
   const downloadPortfolioFile = () => {
     if (!activePortfolio) return;
     const content = `
-=== KARTU E-PORTOFOLIO DIGITAL PENA ===
-Nama Siswa     : ${activePortfolio.studentName}
-Modus          : ${activePortfolio.mode}
-Waktu          : ${activePortfolio.timestamp}
-Status Verifikasi: ${activePortfolio.status}
+=====================================================
+          KARTU E-PORTOFOLIO DIGITAL PENA
+=====================================================
+Nama Siswa       : ${activePortfolio.studentName}
+Modus Pengerjaan : ${activePortfolio.mode}
+Waktu Pengerjaan : ${activePortfolio.timestamp}
+Status Validasi  : ${activePortfolio.status}
 
-[ANALISIS COGNITIVE FRAMEWORK]
-- Teori Ennis  : ${activePortfolio.ennis}
-- Teori Polya  : ${activePortfolio.polya}
+-----------------------------------------------------
+1. KERANGKA TEORI KOGNITIF
+-----------------------------------------------------
+- Indikator Ennis (Berpikir Kritis) : ${activePortfolio.ennis}
+- Tahapan Polya (Pemecahan Masalah) : ${activePortfolio.polya}
 
-[KASUS / KLAIM AI]
+-----------------------------------------------------
+2. KASUS / KLAIM AI YANG DIUJI
+-----------------------------------------------------
 ${activePortfolio.problem}
 
-[DEKONSTRUKSI NALAR SISWA]
+-----------------------------------------------------
+3. DEKONSTRUKSI NALAR SISWA
+-----------------------------------------------------
 ${activePortfolio.deconstructionText}
 
-[LAPORAN DIAGNOSTIK AI]
-Status Nalar   : ${activePortfolio.diagnosis}
-Catatan Evaluasi: ${activePortfolio.aiNotes}
-=======================================
+-----------------------------------------------------
+4. LAPORAN DIAGNOSTIK AI
+-----------------------------------------------------
+- Status Nalar      : ${activePortfolio.diagnosis}
+- Catatan Diagnostik: ${activePortfolio.aiNotes}
+
+-----------------------------------------------------
+5. EVALUASI & CATATAN GURU
+-----------------------------------------------------
+Catatan Guru: ${activePortfolio.teacherFeedback || '(Belum ada catatan)'}
+=====================================================
     `;
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -165,12 +239,11 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
           </span>
         </div>
 
-        {/* Tombol Akses Terproteksi PIN */}
         <button 
           style={userRole === 'guru' ? styles.guruActiveBtn : styles.switchRoleBtn}
           onClick={handleRequestGuruAccess}
         >
-          {userRole === 'siswa' ? '🔒 Masuk Mode Guru (Butuh PIN)' : '🔓 Keluar dari Mode Guru'}
+          {userRole === 'siswa' ? '🔒 Masuk Mode Guru' : '🔓 Keluar dari Mode Guru'}
         </button>
       </header>
 
@@ -178,17 +251,14 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
       {showPinModal && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalCard}>
-            <h3>🔐 Otentikasi Khusus Guru (RBAC)</h3>
+            <h3>🔐 Otentikasi Khusus Guru</h3>
             <p style={{fontSize: '13px', color: '#64748b'}}>
-              Akses ke Dashboard Guru dilindungi PIN Keamanan. Masukkan PIN Rahasia Guru untuk melanjutkan.
-            </p>
-            <p style={{fontSize: '11px', color: '#2563eb', fontWeight: 'bold'}}>
-              (Gunakan PIN Default Demo: <b>PENA2026</b> atau <b>1234</b>)
+              Akses ke Dashboard Guru dilindungi otentikasi. Masukkan PIN Rahasia Guru untuk melanjutkan.
             </p>
             <form onSubmit={handleVerifyPin}>
               <input
                 type="password"
-                placeholder="Masukkan PIN Guru..."
+                placeholder="Masukkan PIN Rahasia Guru..."
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value)}
                 style={styles.input}
@@ -355,13 +425,21 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
                 <p><b>Indikator Ennis:</b> {activePortfolio.ennis}</p>
                 <p><b>Tahapan Polya:</b> {activePortfolio.polya}</p>
                 <p><b>Kasus AI:</b> {activePortfolio.problem}</p>
-                <p><b>Jawaban Dekonstruksi:</b> "{activePortfolio.deconstructionText}"</p>
+                <p><b>Jawaban Dekonstruksi Siswa:</b> "{activePortfolio.deconstructionText}"</p>
                 
                 <div style={styles.diagnosticResult}>
                   <h4>🤖 Laporan Diagnostik AI:</h4>
                   <p><b>Status Nalar:</b> {activePortfolio.diagnosis}</p>
-                  <p><b>Catatan Evaluasi:</b> {activePortfolio.aiNotes}</p>
+                  <p><b>Catatan Evaluasi AI:</b> {activePortfolio.aiNotes}</p>
                 </div>
+
+                {/* TAMPILAN CATATAN REVISI DARI GURU JIKA ADA */}
+                {activePortfolio.teacherFeedback && (
+                  <div style={styles.teacherFeedbackBox}>
+                    <h4>👨‍🏫 Catatan / Alasan Revisi dari Guru:</h4>
+                    <p>"{activePortfolio.teacherFeedback}"</p>
+                  </div>
+                )}
 
                 <div style={{display: 'flex', gap: '10px', marginTop: '15px'}}>
                   <button style={styles.secondaryBtn} onClick={() => window.print()}>
@@ -382,9 +460,9 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
         {activeTab === 'guruDashboard' && userRole === 'guru' && isGuruAuthed && (
           <div style={styles.card}>
             <span style={styles.badge}>Poin 7: RBAC Guru Dashboard</span>
-            <h2>Panel Kontrol Administratif Guru (Protected)</h2>
+            <h2>Panel Kontrol Administratif Guru</h2>
             <p style={{fontSize: '13px', color: '#475569'}}>
-              Hak akses khusus guru untuk meninjau hasil latihan siswa, memvalidasi laporan diagnostik AI, dan memberikan persetujuan (ACC/Revisi).
+              Hak akses khusus guru untuk meninjau detail penguraian nalar siswa, mengevaluasi laporan diagnostik AI, dan memberikan masukan revisi.
             </p>
 
             <table style={styles.table}>
@@ -393,8 +471,8 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
                   <th style={styles.th}>Siswa</th>
                   <th style={styles.th}>Modus</th>
                   <th style={styles.th}>Diagnostik AI</th>
-                  <th style={styles.th}>Status</th>
-                  <th style={styles.th}>Aksi Guru</th>
+                  <th style={styles.th}>Status Validasi</th>
+                  <th style={styles.th}>Aksi Peninjauan Guru</th>
                 </tr>
               </thead>
               <tbody>
@@ -403,21 +481,25 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
                     <td style={styles.td}><b>{sub.studentName}</b></td>
                     <td style={styles.td}>{sub.mode}</td>
                     <td style={styles.td}>
-                      <span style={{fontSize: '12px', color: sub.diagnosis.includes('Permukaan') ? 'red' : 'green'}}>
+                      <span style={{fontSize: '12px', fontWeight: 'bold', color: sub.diagnosis.includes('Permukaan') ? '#dc2626' : '#16a34a'}}>
                         {sub.diagnosis}
                       </span>
                     </td>
                     <td style={styles.td}>
-                      <span style={{fontSize: '11px', padding: '3px 6px', borderRadius: '4px', backgroundColor: '#fef3c7', color: '#92400e'}}>
+                      <span style={{
+                        fontSize: '11px', 
+                        padding: '3px 8px', 
+                        borderRadius: '4px', 
+                        fontWeight: 'bold',
+                        backgroundColor: sub.status.includes('ACC') ? '#dcfce7' : sub.status.includes('Revisi') ? '#fee2e2' : '#fef3c7',
+                        color: sub.status.includes('ACC') ? '#15803d' : sub.status.includes('Revisi') ? '#b91c1c' : '#b45309'
+                      }}>
                         {sub.status}
                       </span>
                     </td>
                     <td style={styles.td}>
-                      <button style={styles.accBtn} onClick={() => handleTeacherAction(sub.id, 'Disetujui Guru (ACC)')}>
-                        ✅ ACC
-                      </button>
-                      <button style={styles.rejectBtn} onClick={() => handleTeacherAction(sub.id, 'Minta Revisi')}>
-                        ❌ Revisi
+                      <button style={styles.inspectBtn} onClick={() => setSelectedSubmission(sub)}>
+                        👁️ Periksa Jawaban
                       </button>
                     </td>
                   </tr>
@@ -426,6 +508,96 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
             </table>
           </div>
         )}
+
+        {/* MODAL PERIKSA JAWABAN SISWA LENGKAP OLEH GURU */}
+        {selectedSubmission && (
+          <div style={styles.modalOverlay}>
+            <div style={styles.largeModalCard}>
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                <h3>📝 Peninjauan Nalar Siswa: {selectedSubmission.studentName}</h3>
+                <button style={styles.closeBtn} onClick={() => setSelectedSubmission(null)}>✖ Close</button>
+              </div>
+              <hr />
+              <div style={{fontSize: '13px', lineHeight: '1.6'}}>
+                <p><b>Waktu Pengerjaan:</b> {selectedSubmission.timestamp}</p>
+                <p><b>Modus Operasional:</b> {selectedSubmission.mode}</p>
+                <p><b>Indikator Ennis:</b> {selectedSubmission.ennis} | <b>Tahapan Polya:</b> {selectedSubmission.polya}</p>
+                
+                <div style={styles.reviewContentBox}>
+                  <b>Klaim / Kasus AI yang Diuji:</b>
+                  <p style={{fontStyle: 'italic', color: '#334155'}}>{selectedSubmission.problem}</p>
+                  
+                  <b>Jawaban Dekonstruksi Nalar Siswa:</b>
+                  <p style={{backgroundColor: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1'}}>
+                    "{selectedSubmission.deconstructionText}"
+                  </p>
+                </div>
+
+                <div style={styles.diagnosticResult}>
+                  <b>🤖 Laporan Diagnostik AI:</b>
+                  <p><b>Status:</b> {selectedSubmission.diagnosis}</p>
+                  <p><b>Catatan Evaluasi:</b> {selectedSubmission.aiNotes}</p>
+                </div>
+
+                {selectedSubmission.teacherFeedback && (
+                  <div style={styles.teacherFeedbackBox}>
+                    <b>👨‍🏫 Catatan Guru yang Tersimpan:</b>
+                    <p>"{selectedSubmission.teacherFeedback}"</p>
+                  </div>
+                )}
+              </div>
+
+              {/* TOMBOL AKSI GURU SETELAH MEMBACA JAWABAN */}
+              <div style={{display: 'flex', gap: '10px', marginTop: '20px'}}>
+                <button 
+                  style={styles.accBtnLarge} 
+                  onClick={() => handleApproveByTeacher(selectedSubmission.id)}
+                >
+                  ✅ Setujui / ACC Jawaban
+                </button>
+                <button 
+                  style={styles.rejectBtnLarge} 
+                  onClick={() => handleOpenRevisionModal(selectedSubmission.id)}
+                >
+                  ❌ Minta Revisi + Tulis Catatan
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL INPUT CATATAN REVISI GURU */}
+        {showRevisionModal && (
+          <div style={styles.modalOverlay}>
+            <div style={styles.modalCard}>
+              <h3>✏️ Tulis Alasan / Catatan Revisi</h3>
+              <p style={{fontSize: '12px', color: '#64748b'}}>
+                Berikan masukan konstruktif agar siswa memahami letak kelemahan nalar mereka.
+              </p>
+              <form onSubmit={handleSaveRevision}>
+                <textarea
+                  rows="4"
+                  placeholder="Contoh: Penjelasan bagian indikator Ennis masih terlalu umum. Harap perjelas kembali argumen penolakan klaim AI..."
+                  value={teacherNoteInput}
+                  onChange={(e) => setTeacherNoteInput(e.target.value)}
+                  style={styles.textarea}
+                  required
+                />
+                <div style={{display: 'flex', gap: '10px'}}>
+                  <button type="submit" style={styles.rejectBtnLarge}>Kirim Catatan Revisi 📩</button>
+                  <button 
+                    type="button" 
+                    style={styles.cancelBtn} 
+                    onClick={() => setShowRevisionModal(false)}
+                  >
+                    Batal
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   );
@@ -433,14 +605,16 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
 
 // CSS Styling
 const styles = {
-  appContainer: { fontFamily: 'sans-serif', maxWidth: '800px', margin: '20px auto', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '10px' },
+  appContainer: { fontFamily: 'sans-serif', maxWidth: '850px', margin: '20px auto', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '10px' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', color: 'white', padding: '15px', borderRadius: '8px' },
   logoText: { margin: 0, fontSize: '18px' },
   roleBadge: { fontSize: '12px', color: '#93c5fd' },
   switchRoleBtn: { backgroundColor: '#dc2626', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' },
   guruActiveBtn: { backgroundColor: '#16a34a', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  modalCard: { backgroundColor: 'white', padding: '25px', borderRadius: '10px', maxWidth: '400px', width: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
+  modalCard: { backgroundColor: 'white', padding: '25px', borderRadius: '10px', maxWidth: '450px', width: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
+  largeModalCard: { backgroundColor: 'white', padding: '25px', borderRadius: '10px', maxWidth: '650px', width: '90%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
+  closeBtn: { backgroundColor: '#e2e8f0', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
   cancelBtn: { backgroundColor: '#94a3b8', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' },
   navBar: { display: 'flex', gap: '8px', margin: '15px 0' },
   navBtn: { backgroundColor: '#cbd5e1', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
@@ -464,9 +638,12 @@ const styles = {
   cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   statusBadge: { backgroundColor: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px' },
   diagnosticResult: { backgroundColor: '#fef3c7', padding: '10px', borderRadius: '6px', marginTop: '10px', color: '#92400e' },
+  teacherFeedbackBox: { backgroundColor: '#fee2e2', padding: '10px', borderRadius: '6px', marginTop: '10px', color: '#991b1b', borderLeft: '4px solid #dc2626' },
+  reviewContentBox: { backgroundColor: '#f1f5f9', padding: '12px', borderRadius: '6px', marginTop: '10px', marginBottom: '10px' },
   table: { width: '100%', borderCollapse: 'collapse', marginTop: '15px', fontSize: '12px' },
   th: { padding: '8px', borderBottom: '2px solid #cbd5e1' },
   td: { padding: '8px' },
-  accBtn: { backgroundColor: '#16a34a', color: 'white', border: 'none', padding: '4px 8px', borderRadius: '3px', cursor: 'pointer', marginRight: '4px', fontSize: '10px' },
-  rejectBtn: { backgroundColor: '#dc2626', color: 'white', border: 'none', padding: '4px 8px', borderRadius: '3px', cursor: 'pointer', fontSize: '10px' }
+  inspectBtn: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' },
+  accBtnLarge: { backgroundColor: '#16a34a', color: 'white', border: 'none', padding: '10px', borderRadius: '6px', cursor: 'pointer', flex: 1, fontWeight: 'bold' },
+  rejectBtnLarge: { backgroundColor: '#dc2626', color: 'white', border: 'none', padding: '10px', borderRadius: '6px', cursor: 'pointer', flex: 1, fontWeight: 'bold' }
 };
