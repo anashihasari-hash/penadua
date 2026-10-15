@@ -19,7 +19,6 @@ export default function App() {
   const [currentStudent, setCurrentStudent] = useState(() => session.get('PENA_STUDENT', null));
   const [apiKey, setApiKey] = useState(() => session.get('PENA_AI_KEY', ''));
   
-  // FIX: Pastikan isApiValid juga membaca session secara akurat saat web direfresh
   const [isApiValid, setIsApiValid] = useState(() => session.get('PENA_AI_KEY', '').length > 10);
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
 
@@ -44,7 +43,6 @@ export default function App() {
   const [showMandiriModal, setShowMandiriModal] = useState(false);
   const [mandiriNameInput, setMandiriNameInput] = useState('');
 
-  // Perbaikan Sistem Storage Key (Menggunakan Class Code Unik)
   const getStorageKeys = (kelas, role) => {
     if (role === 'mandiri') return { students: 'PENA_MDR_STU_ISO', submissions: 'PENA_MDR_SUB_ISO' };
     if (!kelas) return { students: 'PENA_STU_DEF', submissions: 'PENA_SUB_DEF' };
@@ -55,7 +53,6 @@ export default function App() {
   const [students, setStudents] = useState([]);
   const [submissions, setSubmissions] = useState([]);
 
-  // FIX: Sinkronisasi Storage Lintas Tab Murni tanpa setInterval (Ringan & Cepat)
   useEffect(() => {
     const loadClassData = () => {
       if (userRole === 'mandiri') {
@@ -85,7 +82,6 @@ export default function App() {
     return () => window.removeEventListener('storage', loadClassData);
   }, [currentClass, userRole]);
 
-  // Login Siswa
   const [classCodeInput, setClassCodeInput] = useState('');
   const [loginStudentName, setLoginStudentName] = useState('');
   const [loginStudentPin, setLoginStudentPin] = useState('');
@@ -107,7 +103,6 @@ export default function App() {
     const inputName = loginStudentName.trim().toLowerCase();
     const inputPin = loginStudentPin.trim();
 
-    // FIX: Ambil data fresh dari localStorage biar tahan Refresh Page!
     const keys = getStorageKeys(currentClass, 'siswa');
     const savedStu = localStorage.getItem(keys.students);
     const freshStudentList = savedStu ? JSON.parse(savedStu) : [];
@@ -150,7 +145,6 @@ export default function App() {
 
   const handleDeleteClass = () => {
     if(window.confirm('🚨 PERINGATAN: Yakin mau hapus kelas ini beserta SELURUH data siswa dan tugasnya?')) {
-      // FIX: Bandingkan berdasarkan ID spesifik, bukan referensi memori objek
       const targetCode = currentClass.classCode || currentClass.pin;
       const updatedClasses = allClasses.filter(c => (c.classCode || c.pin) !== targetCode);
       
@@ -234,7 +228,7 @@ export default function App() {
         
         const data = await res.json();
         if (data.error) throw new Error(data.error.message);
-        // FIX: Cek keamanan jika Gemini melempar safety block atau memutus respons
+        
         if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
           diagnosis = `[HASIL EVALUASI AI] ${data.candidates[0].content.parts[0].text}`;
         } else {
@@ -459,7 +453,7 @@ export default function App() {
                   <ol style={{margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#444', lineHeight: '1.6'}}>
                     <li>Buka tab baru dan kunjungi: <b>aistudio.google.com/app/apikey</b></li>
                     <li>Login dengan akun Google kamu.</li>
-                    <li>Klik tombol <b>Create API Key</b> (warna biru) > Pilih <i>Create API key in new project</i>.</li>
+                    <li>Klik tombol <b>Create API Key</b> (warna biru) &gt; Pilih <i>Create API key in new project</i>.</li>
                     <li>Salin teks panjang "AIzaSy..." dan tempelkan di kotak bawah ini.</li>
                   </ol>
                 </div>
@@ -502,11 +496,11 @@ export default function App() {
                         <div style={{display: 'flex', gap: '15px', fontSize: '12px', color: '#333'}}>
                           <div style={{flex: 1}}>
                             <b>5 Indikator Ennis:</b><br/>
-                            1. Penjelasan Sederhana (Fokus & Ambigu)<br/>
+                            1. Penjelasan Sederhana (Fokus &amp; Ambigu)<br/>
                             2. Keterampilan Dasar (Kredibilitas Sumber)<br/>
                             3. Menyimpulkan (Deduksi/Induksi Valid)<br/>
                             4. Penjelasan Lanjut (Asumsi Tersembunyi)<br/>
-                            5. Strategi & Taktik (Tindakan Logis)
+                            5. Strategi &amp; Taktik (Tindakan Logis)
                           </div>
                           <div style={{flex: 1}}>
                             <b>4 Tahapan Polya:</b><br/>
@@ -543,9 +537,9 @@ export default function App() {
                     <p><b>Nama Siswa:</b> {activePortfolio.studentName}</p>
                     <p><b>Status Tugas:</b> <span style={{padding: '3px 8px', background: '#eee', borderRadius: '4px'}}>{activePortfolio.status}</span></p>
                     <p><b>Kutipan Naskah:</b><br/> "{activePortfolio.naskahText}"</p>
-                    <p><b>Resolusi & Dekonstruksi Terpadu (Ennis & Polya):</b><br/> "{activePortfolio.deconstructionText}"</p>
+                    <p><b>Resolusi &amp; Dekonstruksi Terpadu (Ennis &amp; Polya):</b><br/> "{activePortfolio.deconstructionText}"</p>
                     <div style={{background: '#f9f9f9', padding: '10px', borderLeft: '3px solid #111', marginTop: '15px'}}>
-                      <p style={{margin: 0, lineHeight: '1.5'}}><b>🤖 Diagnosis Evaluasi AI:</b><br/>{activePortfolio.diagnosis}</p>
+                      <p style={{margin: 0, lineHeight: '1.5'}}><b>🤖 Diagnosis AI &amp; Integritas:</b><br/>{activePortfolio.diagnosis}</p>
                     </div>
                     {activePortfolio.teacherFeedback && (
                       <div style={{background: '#fef2f2', padding: '10px', borderLeft: '3px solid #dc2626', marginTop: '10px'}}>
@@ -637,7 +631,7 @@ export default function App() {
                     <p><b>Kutipan Naskah:</b> <br/><i>"{selectedSubmission.naskahText}"</i></p>
                     <p><b>Uraian Dekonstruksi Terpadu:</b> <br/>"{selectedSubmission.deconstructionText}"</p>
                     <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
-                    <p style={{margin: '0 0 5px 0'}}><b>🤖 Diagnosis AI & Integritas:</b></p>
+                    <p style={{margin: '0 0 5px 0'}}><b>🤖 Diagnosis AI &amp; Integritas:</b></p>
                     <span style={{color: '#b91c1c', display: 'block', padding: '8px', background: '#fef2f2', borderRadius: '4px', lineHeight: '1.5'}}>{selectedSubmission.diagnosis}</span>
                   </div>
                   
