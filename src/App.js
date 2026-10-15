@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 export default function App() {
   // 1. STATE DASAR & RBAC
-  const [userRole, setUserRole] = useState('siswa'); // 'siswa' atau 'guru'
+  const [userRole, setUserRole] = useState('siswa');
   const [isGuruAuthed, setIsGuruAuthed] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
@@ -11,7 +11,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [selectedMode, setSelectedMode] = useState('mandiri');
 
-  // 2. STATE DETEKSI PELANGGARAN KHUSUS KANVAS DEKONSTRUKSI
+  // 2. STATE DETEKSI PELANGGARAN
   const [isPasted, setIsPasted] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
 
@@ -24,66 +24,62 @@ export default function App() {
     deconstructionText: ''
   });
 
-  // 3. DATABASE LOKAL (PERSISTENT STATE LOCALSTORAGE)
+  // KAMUS PERTANYAAN PEMANTIK (POIN REVISI 3)
+  const ennisPrompts = {
+    'Penjelasan Sederhana': 'Fokus: Apakah istilah/konsep dasar dari jawaban AI ini sudah jelas dan tidak membingungkan?',
+    'Keterampilan Dasar': 'Fokus: Apakah sumber atau dasar argumen AI ini bisa dipercaya kredibilitasnya?',
+    'Menyimpulkan': 'Fokus: Apakah kesimpulan yang ditarik AI ini logis? Adakah alternatif kesimpulan lain?',
+    'Penjelasan Lebih Lanjut': 'Fokus: Adakah asumsi tersembunyi yang dipakai AI namun tidak dijelaskan secara gamblang?',
+    'Taktik & Strategi': 'Fokus: Apakah solusi/tindakan yang disarankan AI merupakan langkah yang paling tepat dan aman?'
+  };
+
+  const polyaPrompts = {
+    'Memahami Masalah': 'Fokus: Apa inti dari masalah sebenarnya? Apakah AI benar-benar menjawab pokok masalahnya?',
+    'Merencanakan Penyelesaian': 'Fokus: Bagaimana strategi AI menyusun jawabannya? Apakah urutannya masuk akal?',
+    'Melaksanakan Rencana': 'Fokus: Coba periksa argumen AI, adakah cacat logika saat mengeksekusi penjelasan?',
+    'Memeriksa Kembali': 'Fokus: Mari validasi ulang hasil akhir AI. Apakah ini jawaban mutlak atau bisa diuji lagi?'
+  };
+
+  // 3. DATABASE LOKAL DENGAN CROSS-TAB SYNC (POIN REVISI 4)
   const [submissions, setSubmissions] = useState(() => {
     const saved = localStorage.getItem('PENA_SUBMISSIONS');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
-    }
-    return [
-      {
-        id: 101,
-        certNumber: 'PENA-2026-8831',
-        studentName: 'Budi Santoso',
-        mode: 'Modus Kelompok (Kelas)',
-        problem: 'Apakah AI dapat menggantikan penalaran kritis manusia?',
-        ennis: 'Penjelasan Sederhana',
-        polya: 'Memahami Masalah',
-        deconstructionText: 'AI hanya memproses data statistik. AI tidak memiliki kesadaran kritis, etika, dan empati kognitif.',
-        diagnosis: 'Kritis & Mendalam',
-        aiNotes: 'Penguraian nalar siswa terstruktur logis dan memenuhi kaidah kognitif.',
-        hasCopyPasted: false,
-        tabSwitches: 0,
-        isTooShort: false,
-        timestamp: '15/10/2026, 14:30',
-        status: 'Pending Review',
-        teacherFeedback: ''
-      }
-    ];
+    return saved ? JSON.parse(saved) : [];
   });
+  const [activeSubmissionId, setActiveSubmissionId] = useState(null);
 
-  const [activeSubmissionId, setActiveSubmissionId] = useState(101);
-
-  // SENSOR PINDAH TAB / KELUAR BROWSER (HANYA AKTIF SAAT DI KANVAS WORKSPACE)
+  // Efek Sinkronisasi Antar-Tab (Biar kalau Guru ACC di Tab A, Siswa di Tab B langsung update)
   useEffect(() => {
-    if (activeTab !== 'workspace' || userRole !== 'siswa') return;
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        setTabSwitchCount(prev => prev + 1);
+    const handleStorageChange = (e) => {
+      if (e.key === 'PENA_SUBMISSIONS' && e.newValue) {
+        setSubmissions(JSON.parse(e.newValue));
       }
     };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [activeTab, userRole]);
-
-  // Simpan Otomatis ke LocalStorage
+  // Simpan Otomatis ke LocalStorage setiap ada perubahan state
   useEffect(() => {
     localStorage.setItem('PENA_SUBMISSIONS', JSON.stringify(submissions));
   }, [submissions]);
 
+  // SENSOR PINDAH TAB
+  useEffect(() => {
+    if (activeTab !== 'workspace' || userRole !== 'siswa') return;
+    const handleVisibilityChange = () => {
+      if (document.hidden) setTabSwitchCount(prev => prev + 1);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [activeTab, userRole]);
+
   const activePortfolio = submissions.find(s => s.id === activeSubmissionId) || submissions[0];
 
-  // State Modal Detail Guru
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
   const [targetSubmissionId, setTargetSubmissionId] = useState(null);
   const [teacherNoteInput, setTeacherNoteInput] = useState('');
 
-  // Handle Akses Guru
   const handleRequestGuruAccess = () => {
     if (userRole === 'guru') {
       setUserRole('siswa');
@@ -112,34 +108,19 @@ export default function App() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handlePasteDetect = () => {
-    setIsPasted(true);
-  };
+  const handlePasteDetect = () => setIsPasted(true);
 
-  const handleSaveApiKey = (e) => {
-    e.preventDefault();
-    if (!apiKey.trim()) {
-      alert('Masukkan API Key yang valid!');
-      return;
-    }
-    alert('API Key Google AI Berhasil Diaktifkan!');
-    setActiveTab('workspace');
-  };
-
-  // SUBMIT KANVAS DEKONSTRUKSI
+  // SUBMIT KANVAS (TANPA BATAS KARAKTER - POIN REVISI 2)
   const handleSubmitCanvas = (e) => {
     e.preventDefault();
-    const length = formData.deconstructionText.trim().length;
-    const tooShort = length < 40;
 
     let diagnosis = 'Kritis & Mendalam';
-    let aiNotes = 'Penguraian nalar terstruktur rapi berdasarkan indikator Ennis & Polya.';
-
-    const hasViolations = isPasted || tooShort || tabSwitchCount > 0;
+    let aiNotes = 'Penguraian nalar terstruktur rapi berdasarkan indikator yang dipilih.';
+    const hasViolations = isPasted || tabSwitchCount > 0;
 
     if (hasViolations) {
-      diagnosis = 'PERINGATAN: Ketergantungan Instan AI / Catatan Pelanggaran Nalar';
-      aiNotes = `Terdeteksi indikasi ketergantungan instan: ${isPasted ? '[Salin-Tempel Teks AI] ' : ''}${tabSwitchCount > 0 ? `[Keluar Web/Pindah Tab ${tabSwitchCount}x] ` : ''}${tooShort ? '[Jawaban Dangkal/Kurang Karakter]' : ''}. Silakan tinjau ulang dekonstruksi mandiri Anda.`;
+      diagnosis = 'PERINGATAN: Catatan Pelanggaran Nalar';
+      aiNotes = `Terdeteksi anomali saat pengerjaan: ${isPasted ? '[Salin-Tempel Teks Luar] ' : ''}${tabSwitchCount > 0 ? `[Keluar Web/Pindah Tab ${tabSwitchCount}x]` : ''}. Integritas nalar mandiri dipertanyakan.`;
     }
 
     const newCertNum = `PENA-2026-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -158,7 +139,6 @@ export default function App() {
       aiNotes: aiNotes,
       hasCopyPasted: isPasted,
       tabSwitches: tabSwitchCount,
-      isTooShort: tooShort,
       timestamp: new Date().toLocaleString(),
       status: selectedMode === 'mandiri' ? 'Disetujui Otomatis (Mandiri)' : 'Pending Review',
       teacherFeedback: ''
@@ -167,25 +147,22 @@ export default function App() {
     setSubmissions([newSubmission, ...submissions]);
     setActiveSubmissionId(newId);
     
-    // Reset Sensor Pelanggaran untuk Pengerjaan Berikutnya
     setIsPasted(false);
     setTabSwitchCount(0);
     setActiveTab('portfolio');
   };
 
-  // AKSI GURU: ACC
   const handleApproveByTeacher = (id) => {
-    const feedback = 'Bagus! Pertanggungjawaban nalar telah memenuhi indikator berpikir kritis.';
+    const feedback = 'Bagus! Pertanggungjawaban nalar telah memenuhi kaidah berpikir kritis.';
     setSubmissions(prev =>
       prev.map(item => item.id === id ? { ...item, status: 'Disetujui Guru (ACC)', teacherFeedback: feedback } : item)
     );
-    if (selectedSubmission && selectedSubmission.id === id) {
+    if (selectedSubmission?.id === id) {
       setSelectedSubmission(prev => ({ ...prev, status: 'Disetujui Guru (ACC)', teacherFeedback: feedback }));
     }
-    alert('✅ Tugas berhasil disetujui (ACC)! Status siswa otomatis ter-update.');
+    alert('✅ ACC Berhasil! Tampilan di web Siswa sudah ter-update realtime.');
   };
 
-  // AKSI GURU: REVISI
   const handleOpenRevisionModal = (id) => {
     setTargetSubmissionId(id);
     setTeacherNoteInput('');
@@ -194,43 +171,40 @@ export default function App() {
 
   const handleSaveRevision = (e) => {
     e.preventDefault();
-    if (!teacherNoteInput.trim()) {
-      alert('Mohon isi catatan revisi agar siswa tahu letak kesalahannya!');
-      return;
-    }
-
     setSubmissions(prev =>
-      prev.map(item =>
-        item.id === targetSubmissionId
-          ? { ...item, status: 'Minta Revisi', teacherFeedback: teacherNoteInput }
-          : item
-      )
+      prev.map(item => item.id === targetSubmissionId ? { ...item, status: 'Minta Revisi', teacherFeedback: teacherNoteInput } : item)
     );
-
-    if (selectedSubmission && selectedSubmission.id === targetSubmissionId) {
+    if (selectedSubmission?.id === targetSubmissionId) {
       setSelectedSubmission(prev => ({ ...prev, status: 'Minta Revisi', teacherFeedback: teacherNoteInput }));
     }
-
     setShowRevisionModal(false);
-    setTeacherNoteInput('');
-    alert('❌ Status diubah menjadi Minta Revisi & Catatan terkirim ke E-Portofolio siswa!');
+    alert('❌ Catatan Revisi terkirim ke E-Portofolio siswa!');
   };
 
   return (
     <div style={styles.appContainer}>
-      {/* HEADER & SWITCH ROLE */}
+      {/* INJECT CSS UNTUK UKURAN A4 PRINT (POIN REVISI 1) */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #certPrintArea, #certPrintArea * { visibility: visible; }
+          #certPrintArea { 
+            position: absolute; left: 0; top: 0; 
+            width: 210mm; /* Lebar A4 */
+            min-height: 297mm; /* Tinggi A4 */
+            padding: 10mm; box-sizing: border-box;
+          }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+
+      {/* HEADER */}
       <header style={styles.header} className="no-print">
         <div>
-          <h2 style={styles.logoText}>PENA 🛡️ (Pertanggungjawaban Nalar)</h2>
-          <span style={styles.roleBadge}>
-            Peran: <b>{userRole === 'siswa' ? '🎓 Siswa' : '👨‍🏫 Guru (Akses Terverifikasi)'}</b>
-          </span>
+          <h2 style={styles.logoText}>PENA 🛡️</h2>
+          <span style={styles.roleBadge}>Peran: <b>{userRole === 'siswa' ? '🎓 Siswa' : '👨‍🏫 Guru'}</b></span>
         </div>
-
-        <button 
-          style={userRole === 'guru' ? styles.guruActiveBtn : styles.switchRoleBtn}
-          onClick={handleRequestGuruAccess}
-        >
+        <button style={userRole === 'guru' ? styles.guruActiveBtn : styles.switchRoleBtn} onClick={handleRequestGuruAccess}>
           {userRole === 'siswa' ? '🔒 Masuk Mode Guru' : '🔓 Keluar Mode Guru'}
         </button>
       </header>
@@ -240,19 +214,10 @@ export default function App() {
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard}>
             <h3>🔐 Otentikasi Khusus Guru</h3>
-            <p style={{fontSize: '13px', color: '#64748b'}}>Masukkan PIN Rahasia Guru untuk membuka Dashboard Kontrol.</p>
             <form onSubmit={handleVerifyPin}>
-              <input
-                type="password"
-                placeholder="Masukkan PIN Guru..."
-                value={pinInput}
-                onChange={(e) => setPinInput(e.target.value)}
-                style={styles.input}
-                autoFocus
-                required
-              />
+              <input type="password" placeholder="PIN Demo: PENA2026" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} autoFocus required />
               <div style={{display: 'flex', gap: '10px'}}>
-                <button type="submit" style={styles.primaryBtn}>Verifikasi 🔑</button>
+                <button type="submit" style={styles.primaryBtn}>Masuk 🔑</button>
                 <button type="button" style={styles.cancelBtn} onClick={() => setShowPinModal(false)}>Batal</button>
               </div>
             </form>
@@ -260,101 +225,63 @@ export default function App() {
         </div>
       )}
 
-      {/* NAVIGASI BERDASARKAN PERAN */}
+      {/* NAVIGASI */}
       <nav style={styles.navBar} className="no-print">
         {userRole === 'siswa' ? (
           <>
             <button style={activeTab === 'landing' ? styles.navBtnActive : styles.navBtn} onClick={() => setActiveTab('landing')}>1. Beranda</button>
             <button style={activeTab === 'apiKey' ? styles.navBtnActive : styles.navBtn} onClick={() => setActiveTab('apiKey')}>2. API Key</button>
             <button style={activeTab === 'workspace' ? styles.navBtnActive : styles.navBtn} onClick={() => setActiveTab('workspace')}>3,5,6. Kanvas Nalar</button>
-            <button style={activeTab === 'portfolio' ? styles.navBtnActive : styles.navBtn} onClick={() => setActiveTab('portfolio')}>4. E-Portofolio PDF</button>
+            <button style={activeTab === 'portfolio' ? styles.navBtnActive : styles.navBtn} onClick={() => setActiveTab('portfolio')}>4. E-Portofolio</button>
           </>
         ) : (
           <button style={activeTab === 'guruDashboard' ? styles.navBtnActive : styles.navBtn} onClick={() => setActiveTab('guruDashboard')}>
-            📊 Dashboard Kontrol Guru (RBAC Active)
+            📊 Dashboard Kontrol Guru (Realtime Sync)
           </button>
         )}
       </nav>
 
       <main style={styles.mainContent}>
+        
         {/* ================= 1. BERANDA ================= */}
         {activeTab === 'landing' && userRole === 'siswa' && (
           <div style={styles.card} className="no-print">
-            <span style={styles.badge}>Poin 1: Landing Page</span>
             <h1 style={styles.title}>Disrupsi Ketergantungan AI dengan Nalar</h1>
-            <p style={styles.paragraph}>
-              Platform PENA memfasilitasi transisi dari naskah fisik (Pilar 1) menuju kanvas digital (Pilar 2) untuk memastikan setiap jawaban dipertanggungjawabkan secara kritis.
-            </p>
-            <button style={styles.primaryBtn} onClick={() => setActiveTab('apiKey')}>
-              Mulai Setup API Key Google AI ➔
-            </button>
+            <p style={styles.paragraph}>Transisi dari naskah fisik menuju kanvas digital untuk memastikan setiap jawaban dipertanggungjawabkan secara kritis.</p>
+            <button style={styles.primaryBtn} onClick={() => setActiveTab('apiKey')}>Mulai Setup API Key ➔</button>
           </div>
         )}
 
         {/* ================= 2. SETUP API KEY ================= */}
         {activeTab === 'apiKey' && userRole === 'siswa' && (
           <div style={styles.card} className="no-print">
-            <span style={styles.badge}>Poin 2: Guide API Key</span>
             <h2>Pengaturan Google AI Studio</h2>
-            <p style={{fontSize: '12px', color: '#16a34a', fontWeight: 'bold'}}>
-              ℹ️ Bebas membuka tab/situs luar di tahap ini untuk mengambil API Key tanpa dikurangi poin.
-            </p>
-            <ol style={styles.list}>
-              <li>Buka <b>aistudio.google.com</b>.</li>
-              <li>Klik tombol <b>Create API Key</b>.</li>
-              <li>Salin kode unik API Anda.</li>
-              <li>Tempelkan ke kolom di bawah ini:</li>
-            </ol>
-            <form onSubmit={handleSaveApiKey}>
-              <input
-                type="password"
-                placeholder="Tempel API Key di sini..."
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                style={styles.input}
-                required
-              />
+            <p style={{fontSize: '12px', color: '#16a34a'}}>ℹ️ Bebas membuka tab luar di tahap ini tanpa dikurangi poin.</p>
+            <form onSubmit={(e) => { e.preventDefault(); setActiveTab('workspace'); }}>
+              <input type="password" placeholder="Tempel API Key di sini..." style={styles.input} required />
               <button type="submit" style={styles.primaryBtn}>Simpan & Aktifkan 🔑</button>
             </form>
           </div>
         )}
 
-        {/* ================= 3, 5, & 6. KANVAS DEKONSTRUKSI NALAR (SENSING ACTIVE) ================= */}
+        {/* ================= 3, 5, & 6. KANVAS DEKONSTRUKSI ================= */}
         {activeTab === 'workspace' && userRole === 'siswa' && (
           <div style={styles.card} className="no-print">
             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-              <span style={styles.badge}>Poin 3, 5, 6: WorkSpace</span>
+              <h2>Kanvas Dekonstruksi Nalar Mandiri</h2>
               <span style={{fontSize: '11px', backgroundColor: '#fee2e2', color: '#991b1b', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold'}}>
-                🔴 Sistem Pengawasan Nalar Aktif
+                🔴 Pengawasan Nalar Aktif
               </span>
             </div>
 
-            <h2 style={{marginTop: '10px'}}>Kanvas Dekonstruksi Nalar Mandiri</h2>
-
-            {/* STATUS MONITORING REALTIME */}
             <div style={styles.monitoringBar}>
               <span>👀 Keluar Web / Pindah Tab: <b style={{color: tabSwitchCount > 0 ? '#dc2626' : '#16a34a'}}>{tabSwitchCount} Kali</b></span>
               <span>📋 Terdeteksi Paste: <b style={{color: isPasted ? '#dc2626' : '#16a34a'}}>{isPasted ? 'YA' : 'TIDAK'}</b></span>
             </div>
 
             <div style={styles.modeBox}>
-              <label><b>Pilih Modus Operasional:</b></label>
-              <div style={{display: 'flex', gap: '10px', marginTop: '5px'}}>
-                <button 
-                  type="button" 
-                  style={selectedMode === 'mandiri' ? styles.modeActive : styles.modeInactive}
-                  onClick={() => setSelectedMode('mandiri')}
-                >
-                  🟢 Modus Mandiri (Privat / Latihan)
-                </button>
-                <button 
-                  type="button" 
-                  style={selectedMode === 'kelompok' ? styles.modeActive : styles.modeInactive}
-                  onClick={() => setSelectedMode('kelompok')}
-                >
-                  🔵 Modus Kelompok (Tugas Kelas Guru)
-                </button>
-              </div>
+              <button type="button" style={selectedMode === 'mandiri' ? styles.modeActive : styles.modeInactive} onClick={() => setSelectedMode('mandiri')}>🟢 Mandiri (Privat)</button>
+              <button type="button" style={selectedMode === 'kelompok' ? styles.modeActive : styles.modeInactive} onClick={() => setSelectedMode('kelompok')}>🔵 Kelompok (Tugas Guru)</button>
             </div>
 
             <form onSubmit={handleSubmitCanvas}>
@@ -368,90 +295,65 @@ export default function App() {
                 <textarea name="problem" rows="2" value={formData.problem} onChange={handleInputChange} style={styles.textarea} required />
               </div>
 
-              <div style={{display: 'flex', gap: '10px'}}>
-                <div style={{flex: 1}}>
-                  <label>A. Teori Ennis (Kritis):</label>
-                  <select name="ennisIndicator" value={formData.ennisIndicator} onChange={handleInputChange} style={styles.input}>
-                    <option>Penjelasan Sederhana</option>
-                    <option>Keterampilan Dasar</option>
-                    <option>Menyimpulkan</option>
-                    <option>Penjelasan Lebih Lanjut</option>
-                    <option>Taktik & Strategi</option>
+              {/* INDIKATOR DENGAN PERTANYAAN PEMANTIK (POIN REVISI 3) */}
+              <div style={{display: 'flex', gap: '15px', flexDirection: 'column', marginBottom: '15px'}}>
+                <div style={{flex: 1, backgroundColor: '#f8fafc', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1'}}>
+                  <label style={{fontWeight: 'bold'}}>A. Teori Kritis (Ennis):</label>
+                  <select name="ennisIndicator" value={formData.ennisIndicator} onChange={handleInputChange} style={{...styles.input, marginTop: '8px', marginBottom: '8px'}}>
+                    {Object.keys(ennisPrompts).map(key => <option key={key} value={key}>{key}</option>)}
                   </select>
+                  <div style={styles.promptBox}>💡 <b>Pemantik:</b> {ennisPrompts[formData.ennisIndicator]}</div>
                 </div>
-                <div style={{flex: 1}}>
-                  <label>B. Teori Polya (Masalah):</label>
-                  <select name="polyaStep" value={formData.polyaStep} onChange={handleInputChange} style={styles.input}>
-                    <option>Memahami Masalah</option>
-                    <option>Merencanakan Penyelesaian</option>
-                    <option>Melaksanakan Rencana</option>
-                    <option>Memeriksa Kembali</option>
+
+                <div style={{flex: 1, backgroundColor: '#f8fafc', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1'}}>
+                  <label style={{fontWeight: 'bold'}}>B. Teori Masalah (Polya):</label>
+                  <select name="polyaStep" value={formData.polyaStep} onChange={handleInputChange} style={{...styles.input, marginTop: '8px', marginBottom: '8px'}}>
+                    {Object.keys(polyaPrompts).map(key => <option key={key} value={key}>{key}</option>)}
                   </select>
+                  <div style={styles.promptBox}>💡 <b>Pemantik:</b> {polyaPrompts[formData.polyaStep]}</div>
                 </div>
               </div>
 
               <div style={styles.formGroup}>
-                <label>
-                  Uraian Dekonstruksi Nalar Mandiri:
-                </label>
-                <textarea 
-                  name="deconstructionText" 
-                  rows="4" 
-                  value={formData.deconstructionText} 
-                  onChange={handleInputChange} 
-                  onPaste={handlePasteDetect} 
-                  placeholder="Ketik analisis nalar mandiri Anda secara jujur di sini..." 
-                  style={styles.textarea} 
-                  required 
-                />
+                <label>Uraian Dekonstruksi Nalar (Elaborasikan dari pemantik di atas):</label>
+                <textarea name="deconstructionText" rows="5" value={formData.deconstructionText} onChange={handleInputChange} onPaste={handlePasteDetect} placeholder="Ketik analisis kritis kamu..." style={styles.textarea} required />
               </div>
 
-              <button type="submit" style={styles.primaryBtn}>Kirim & Hasilkan E-Portofolio PDF 🚀</button>
+              <button type="submit" style={styles.primaryBtn}>Kirim & Hasilkan E-Portofolio 🚀</button>
             </form>
           </div>
         )}
 
-        {/* ================= 4. SERTIFIKAT E-PORTOFOLIO RESMI ================= */}
+        {/* ================= 4. SERTIFIKAT A4 (POIN REVISI 1) ================= */}
         {activeTab === 'portfolio' && userRole === 'siswa' && (
           <div>
             <div style={{marginBottom: '15px', display: 'flex', justifyContent: 'space-between'}} className="no-print">
               <div>
-                <h3>🎓 E-Portofolio Digital & Sertifikat Nalar</h3>
-                <p style={{fontSize: '12px', color: '#64748b'}}>Terhubung otomatis secara realtime dengan peninjauan Guru.</p>
+                <h3>🎓 E-Portofolio Digital Siswa</h3>
+                <p style={{fontSize: '12px', color: '#64748b'}}>Halaman ini akan di-format ukuran A4 saat dicetak PDF.</p>
               </div>
-              <button style={styles.printBtn} onClick={() => window.print()}>
-                📄 Cetak / Download Sertifikat PDF
-              </button>
+              <button style={styles.printBtn} onClick={() => window.print()}>📄 Cetak / Download PDF (A4)</button>
             </div>
 
             {activePortfolio ? (
-              <div style={styles.certContainer} id="certPrintArea">
+              <div id="certPrintArea" style={{backgroundColor: '#fff'}}>
                 <div style={styles.certBorder}>
-                  {/* HEADER SERTIFIKAT */}
                   <div style={styles.certHeader}>
-                    <h1 style={styles.certTitle}>PENA: SERTIFIKAT VERIFIKASI NALAR</h1>
+                    <h1 style={styles.certTitle}>SERTIFIKAT VERIFIKASI NALAR</h1>
                     <p style={styles.certSub}>Platform Pertanggungjawaban Nalar Kognitif Siswa</p>
                     <span style={styles.certNumber}>NO. REGISTRASI: {activePortfolio.certNumber}</span>
                   </div>
 
                   <hr style={styles.certDivider} />
 
-                  {/* IDENTITAS SISWA */}
                   <div style={styles.certBody}>
-                    <p>Sertifikat dan Laporan Diagnostik ini resmi diterbitkan untuk:</p>
+                    <p>Sertifikat dan Laporan Diagnostik ini diterbitkan untuk:</p>
                     <h2 style={styles.studentNameTitle}>{activePortfolio.studentName}</h2>
-                    <p style={{fontSize: '13px'}}>
-                      Telah menyelesaikan pengerjaan pada <b>{activePortfolio.mode}</b> pada tanggal <b>{activePortfolio.timestamp}</b>.
-                    </p>
+                    <p style={{fontSize: '13px'}}>Diselesaikan dalam <b>{activePortfolio.mode}</b> pada <b>{activePortfolio.timestamp}</b>.</p>
 
-                    {/* STATUS VERIFIKASI GURU */}
                     <div style={styles.statusBox}>
-                      STATUS VERIFIKASI SEKARANG: 
-                      <span style={{
-                        marginLeft: '8px',
-                        padding: '4px 10px',
-                        borderRadius: '4px',
-                        fontWeight: 'bold',
+                      STATUS VERIFIKASI: 
+                      <span style={{ marginLeft: '8px', padding: '4px 10px', borderRadius: '4px', fontWeight: 'bold',
                         backgroundColor: activePortfolio.status.includes('ACC') ? '#dcfce7' : activePortfolio.status.includes('Revisi') ? '#fee2e2' : '#fef3c7',
                         color: activePortfolio.status.includes('ACC') ? '#15803d' : activePortfolio.status.includes('Revisi') ? '#b91c1c' : '#b45309'
                       }}>
@@ -459,89 +361,74 @@ export default function App() {
                       </span>
                     </div>
 
-                    {/* CATATAN PELANGGARAN TERDETEKSI */}
-                    {(activePortfolio.hasCopyPasted || activePortfolio.isTooShort || activePortfolio.tabSwitches > 0) && (
+                    {(activePortfolio.hasCopyPasted || activePortfolio.tabSwitches > 0) && (
                       <div style={styles.violationCard}>
                         <h4 style={{margin: '0 0 5px 0', color: '#991b1b'}}>⚠️ REKAM JEJAK PELANGGARAN NALAR:</h4>
-                        {activePortfolio.tabSwitches > 0 && <p style={{margin: '2px 0'}}>• Terdeteksi keluar web / berpindah tab sebanyak <b>{activePortfolio.tabSwitches}x</b> saat pengerjaan dekonstruksi.</p>}
-                        {activePortfolio.hasCopyPasted && <p style={{margin: '2px 0'}}>• Terdeteksi melakukan aksi Copy-Paste teks dari luar.</p>}
-                        {activePortfolio.isTooShort && <p style={{margin: '2px 0'}}>• Jawaban dekonstruksi nalar kurang dari 40 karakter (terlalu dangkal).</p>}
+                        {activePortfolio.tabSwitches > 0 && <p style={{margin: '2px 0'}}>• Keluar web / berpindah tab sebanyak <b>{activePortfolio.tabSwitches}x</b>.</p>}
+                        {activePortfolio.hasCopyPasted && <p style={{margin: '2px 0'}}>• Terdeteksi aksi Copy-Paste teks.</p>}
                       </div>
                     )}
 
-                    {/* KERANGKA TEORI */}
                     <div style={styles.frameworkGrid}>
-                      <div style={styles.frameworkItem}>
-                        <b>Teori Kritis (Ennis):</b>
-                        <p>{activePortfolio.ennis}</p>
-                      </div>
-                      <div style={styles.frameworkItem}>
-                        <b>Tahapan Masalah (Polya):</b>
-                        <p>{activePortfolio.polya}</p>
-                      </div>
+                      <div style={styles.frameworkItem}><b>Teori Kritis (Ennis):</b><p>{activePortfolio.ennis}</p></div>
+                      <div style={styles.frameworkItem}><b>Tahapan Masalah (Polya):</b><p>{activePortfolio.polya}</p></div>
                     </div>
 
-                    {/* DEKONSTRUKSI NALAR */}
                     <div style={styles.deconstructionBox}>
-                      <b>Klaim/Kasus AI yang Diuji:</b>
-                      <p style={{fontStyle: 'italic', color: '#475569'}}>{activePortfolio.problem}</p>
-                      <b>Uraian Dekonstruksi Nalar Siswa:</b>
+                      <b>Klaim/Kasus AI:</b> <p style={{fontStyle: 'italic', color: '#475569'}}>{activePortfolio.problem}</p>
+                      <b style={{display:'block', marginTop:'10px'}}>Dekonstruksi Nalar:</b>
                       <p style={{backgroundColor: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', marginTop: '5px'}}>
                         "{activePortfolio.deconstructionText}"
                       </p>
                     </div>
 
-                    {/* DIAGNOSTIK AI */}
                     <div style={styles.diagnosticBoxCert}>
-                      <b>🤖 Laporan Diagnostik AI:</b>
+                      <b>🤖 Diagnostik AI:</b>
                       <p><b>Diagnosa:</b> {activePortfolio.diagnosis}</p>
                       <p><b>Catatan:</b> {activePortfolio.aiNotes}</p>
                     </div>
 
-                    {/* CATATAN EVALUASI GURU */}
                     {activePortfolio.teacherFeedback && (
                       <div style={styles.teacherFeedbackCert}>
-                        <b>👨‍🏫 Evaluasi & Catatan Guru:</b>
-                        <p style={{marginTop: '4px'}}>"{activePortfolio.teacherFeedback}"</p>
+                        <b>👨‍🏫 Evaluasi Guru:</b> <p>"{activePortfolio.teacherFeedback}"</p>
                       </div>
                     )}
 
-                    {/* FOOTER & STEMPEL */}
+                    {/* FOOTER & TTD GURU KONDISIONAL (POIN REVISI 1) */}
                     <div style={styles.certFooter}>
                       <div>
-                        <p style={{fontSize: '11px', color: '#64748b'}}>Terverifikasi oleh Sistem PENA AI</p>
-                        <div style={styles.digitalSeal}>PENALISASI DIGITAL</div>
+                        <p style={{fontSize: '11px', color: '#64748b'}}>Terverifikasi oleh Sistem PENA</p>
+                        <div style={styles.digitalSeal}>VALIDASI DIGITAL</div>
                       </div>
-                      <div style={{textAlign: 'right'}}>
-                        <p style={{fontSize: '11px', color: '#64748b'}}>Tanda Tangan Pengajar/Guru</p>
-                        <p style={{marginTop: '25px', fontWeight: 'bold'}}>(_______________________)</p>
-                      </div>
+                      
+                      {/* Hanya tampilkan TTD Guru jika Mode Kelompok */}
+                      {activePortfolio.mode.includes('Kelompok') && (
+                        <div style={{textAlign: 'right'}}>
+                          <p style={{fontSize: '11px', color: '#64748b'}}>Tanda Tangan Guru</p>
+                          <p style={{marginTop: '30px', fontWeight: 'bold'}}>(_______________________)</p>
+                        </div>
+                      )}
                     </div>
-
                   </div>
                 </div>
               </div>
-            ) : (
-              <p>Belum ada data E-Portofolio.</p>
-            )}
+            ) : <p>Belum ada data portofolio.</p>}
           </div>
         )}
 
-        {/* ================= 7. DASHBOARD KONTROL GURU (RBAC) ================= */}
+        {/* ================= 7. DASHBOARD KONTROL GURU ================= */}
         {activeTab === 'guruDashboard' && userRole === 'guru' && isGuruAuthed && (
           <div style={styles.card} className="no-print">
-            <span style={styles.badge}>Poin 7: RBAC Guru Dashboard</span>
             <h2>Panel Kontrol Administratif Guru</h2>
-            <p style={{fontSize: '13px', color: '#475569'}}>
-              Evaluasi kiriman siswa, periksa rekam jejak keluar web/copy-paste, dan berikan ACC atau Catatan Revisi.
-            </p>
-
+            <p style={{fontSize: '13px', color: '#475569'}}>Setiap perubahan ACC/Revisi di sini akan otomatis tersinkronisasi ke tab browser milik Siswa secara realtime.</p>
+            
+            {submissions.length === 0 ? <p style={{fontStyle:'italic'}}>Belum ada tugas siswa yang masuk.</p> : (
             <table style={styles.table}>
               <thead>
                 <tr style={{backgroundColor: '#e2e8f0', textAlign: 'left'}}>
                   <th style={styles.th}>Siswa</th>
                   <th style={styles.th}>Modus</th>
-                  <th style={styles.th}>Pelanggaran Nalar</th>
+                  <th style={styles.th}>Pelanggaran</th>
                   <th style={styles.th}>Status</th>
                   <th style={styles.th}>Aksi Guru</th>
                 </tr>
@@ -552,93 +439,47 @@ export default function App() {
                     <td style={styles.td}><b>{sub.studentName}</b></td>
                     <td style={styles.td}>{sub.mode}</td>
                     <td style={styles.td}>
-                      {sub.hasCopyPasted || sub.isTooShort || sub.tabSwitches > 0 ? (
-                        <span style={{color: '#dc2626', fontWeight: 'bold', fontSize: '11px'}}>
-                          ⚠️ {sub.tabSwitches > 0 ? `Pindah Tab (${sub.tabSwitches}x) ` : ''}
-                          {sub.hasCopyPasted ? 'Copy-Paste ' : ''}
-                          {sub.isTooShort ? 'Dangkal' : ''}
-                        </span>
-                      ) : (
-                        <span style={{color: '#16a34a', fontSize: '11px'}}>✅ Jujur & Aman</span>
-                      )}
+                      {sub.hasCopyPasted || sub.tabSwitches > 0 ? (
+                        <span style={{color: '#dc2626', fontWeight: 'bold', fontSize: '11px'}}>⚠️ Ada Anomali</span>
+                      ) : <span style={{color: '#16a34a', fontSize: '11px'}}>✅ Aman</span>}
                     </td>
                     <td style={styles.td}>
-                      <span style={{
-                        fontSize: '11px', 
-                        padding: '3px 8px', 
-                        borderRadius: '4px', 
-                        fontWeight: 'bold',
+                      <span style={{fontSize: '11px', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold',
                         backgroundColor: sub.status.includes('ACC') ? '#dcfce7' : sub.status.includes('Revisi') ? '#fee2e2' : '#fef3c7',
                         color: sub.status.includes('ACC') ? '#15803d' : sub.status.includes('Revisi') ? '#b91c1c' : '#b45309'
-                      }}>
-                        {sub.status}
-                      </span>
+                      }}>{sub.status}</span>
                     </td>
                     <td style={styles.td}>
-                      <button style={styles.inspectBtn} onClick={() => setSelectedSubmission(sub)}>
-                        👁️ Periksa & Evaluasi
-                      </button>
+                      <button style={styles.inspectBtn} onClick={() => setSelectedSubmission(sub)}>👁️ Periksa & Evaluasi</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            )}
           </div>
         )}
 
-        {/* MODAL PERIKSA JAWABAN SISWA OLEH GURU */}
+        {/* MODAL PENINJAUAN GURU */}
         {selectedSubmission && (
           <div style={styles.modalOverlay} className="no-print">
             <div style={styles.largeModalCard}>
               <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                <h3>📝 Peninjauan Nalar Siswa: {selectedSubmission.studentName}</h3>
+                <h3>📝 Peninjauan Nalar: {selectedSubmission.studentName}</h3>
                 <button style={styles.closeBtn} onClick={() => setSelectedSubmission(null)}>✖ Close</button>
               </div>
               <hr />
               <div style={{fontSize: '13px', lineHeight: '1.6'}}>
-                <p><b>Waktu Pengerjaan:</b> {selectedSubmission.timestamp}</p>
                 <p><b>Indikator Ennis:</b> {selectedSubmission.ennis} | <b>Tahapan Polya:</b> {selectedSubmission.polya}</p>
                 
-                {(selectedSubmission.hasCopyPasted || selectedSubmission.isTooShort || selectedSubmission.tabSwitches > 0) && (
-                  <div style={styles.violationCard}>
-                    <b>⚠️ CATATAN PELANGGARAN SISTEM:</b>
-                    {selectedSubmission.tabSwitches > 0 && <p style={{margin: '0'}}>• Siswa terdeteksi berpindah tab/keluar browser sebanyak <b>{selectedSubmission.tabSwitches} kali</b> saat mengisi dekonstruksi nalar.</p>}
-                    {selectedSubmission.hasCopyPasted && <p style={{margin: '0'}}>• Siswa terdeteksi melakukan Copy-Paste teks luar.</p>}
-                    {selectedSubmission.isTooShort && <p style={{margin: '0'}}>• Teks dekonstruksi nalar terlalu singkat/dangkal.</p>}
-                  </div>
-                )}
-
                 <div style={styles.reviewContentBox}>
-                  <b>Klaim/Kasus AI:</b>
-                  <p style={{fontStyle: 'italic', color: '#334155'}}>{selectedSubmission.problem}</p>
-                  
                   <b>Jawaban Dekonstruksi Nalar Siswa:</b>
-                  <p style={{backgroundColor: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1'}}>
-                    "{selectedSubmission.deconstructionText}"
-                  </p>
+                  <p style={{backgroundColor: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1'}}>"{selectedSubmission.deconstructionText}"</p>
                 </div>
-
-                <div style={styles.diagnosticResult}>
-                  <b>🤖 Laporan Diagnostik AI:</b>
-                  <p><b>Status:</b> {selectedSubmission.diagnosis}</p>
-                  <p><b>Catatan:</b> {selectedSubmission.aiNotes}</p>
-                </div>
-
-                {selectedSubmission.teacherFeedback && (
-                  <div style={styles.teacherFeedbackCert}>
-                    <b>👨‍🏫 Catatan Guru yang Tersimpan:</b>
-                    <p>"{selectedSubmission.teacherFeedback}"</p>
-                  </div>
-                )}
               </div>
-
               <div style={{display: 'flex', gap: '10px', marginTop: '20px'}}>
-                <button style={styles.accBtnLarge} onClick={() => handleApproveByTeacher(selectedSubmission.id)}>
-                  ✅ Setujui / ACC Jawaban
-                </button>
-                <button style={styles.rejectBtnLarge} onClick={() => handleOpenRevisionModal(selectedSubmission.id)}>
-                  ❌ Minta Revisi + Tulis Catatan
-                </button>
+                <button style={styles.accBtnLarge} onClick={() => handleApproveByTeacher(selectedSubmission.id)}>✅ Setujui / ACC</button>
+                <button style={styles.rejectBtnLarge} onClick={() => handleOpenRevisionModal(selectedSubmission.id)}>❌ Minta Revisi</button>
               </div>
             </div>
           </div>
@@ -648,19 +489,11 @@ export default function App() {
         {showRevisionModal && (
           <div style={styles.modalOverlay} className="no-print">
             <div style={styles.modalCard}>
-              <h3>✏️ Tulis Alasan / Catatan Revisi</h3>
-              <p style={{fontSize: '12px', color: '#64748b'}}>Berikan masukan agar siswa tahu letak kekurangannya.</p>
+              <h3>✏️ Catatan Revisi untuk {selectedSubmission?.studentName}</h3>
               <form onSubmit={handleSaveRevision}>
-                <textarea
-                  rows="4"
-                  placeholder="Contoh: Terdeteksi keluar tab 3 kali dan copy-paste. Harap tuliskan kembali penjelasan nalar secara jujur..."
-                  value={teacherNoteInput}
-                  onChange={(e) => setTeacherNoteInput(e.target.value)}
-                  style={styles.textarea}
-                  required
-                />
+                <textarea rows="4" placeholder="Tuliskan saran perbaikan nalar..." value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={styles.textarea} required />
                 <div style={{display: 'flex', gap: '10px'}}>
-                  <button type="submit" style={styles.rejectBtnLarge}>Kirim Catatan Revisi 📩</button>
+                  <button type="submit" style={styles.rejectBtnLarge}>Kirim Revisi 📩</button>
                   <button type="button" style={styles.cancelBtn} onClick={() => setShowRevisionModal(false)}>Batal</button>
                 </div>
               </form>
@@ -673,7 +506,7 @@ export default function App() {
   );
 }
 
-// CSS STYLING
+// STYLING CSS
 const styles = {
   appContainer: { fontFamily: 'sans-serif', maxWidth: '850px', margin: '20px auto', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '10px' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', color: 'white', padding: '15px', borderRadius: '8px' },
@@ -683,7 +516,7 @@ const styles = {
   guruActiveBtn: { backgroundColor: '#16a34a', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
   modalCard: { backgroundColor: 'white', padding: '25px', borderRadius: '10px', maxWidth: '450px', width: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
-  largeModalCard: { backgroundColor: 'white', padding: '25px', borderRadius: '10px', maxWidth: '650px', width: '90%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
+  largeModalCard: { backgroundColor: 'white', padding: '25px', borderRadius: '10px', maxWidth: '650px', width: '90%', maxHeight: '85vh', overflowY: 'auto' },
   closeBtn: { backgroundColor: '#e2e8f0', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
   cancelBtn: { backgroundColor: '#94a3b8', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' },
   navBar: { display: 'flex', gap: '8px', margin: '15px 0' },
@@ -696,18 +529,15 @@ const styles = {
   paragraph: { fontSize: '14px', color: '#475569' },
   primaryBtn: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', flex: 1, marginTop: '10px' },
   printBtn: { backgroundColor: '#0284c7', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' },
-  input: { width: '100%', padding: '8px', margin: '8px 0 15px 0', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box' },
-  textarea: { width: '100%', padding: '8px', margin: '8px 0 15px 0', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontFamily: 'inherit' },
-  list: { fontSize: '13px', lineHeight: '1.6' },
-  formGroup: { marginBottom: '10px' },
+  input: { width: '100%', padding: '8px', margin: '8px 0', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box' },
+  textarea: { width: '100%', padding: '8px', margin: '8px 0', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontFamily: 'inherit' },
+  promptBox: { backgroundColor: '#fef3c7', padding: '8px 12px', borderRadius: '4px', fontSize: '12px', color: '#92400e', marginTop: '5px', borderLeft: '3px solid #f59e0b' },
   monitoringBar: { backgroundColor: '#eff6ff', padding: '8px 12px', borderRadius: '6px', margin: '10px 0', fontSize: '12px', display: 'flex', gap: '20px', border: '1px solid #bfdbfe' },
-  modeBox: { backgroundColor: '#f1f5f9', padding: '10px', borderRadius: '6px', marginBottom: '15px' },
-  modeActive: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '6px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' },
-  modeInactive: { backgroundColor: '#e2e8f0', color: '#475569', border: 'none', padding: '6px 10px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer' },
+  modeBox: { backgroundColor: '#f1f5f9', padding: '8px', borderRadius: '6px', marginBottom: '15px', display: 'flex', gap: '10px' },
+  modeActive: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '6px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', flex: 1 },
+  modeInactive: { backgroundColor: '#e2e8f0', color: '#475569', border: 'none', padding: '6px 10px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', flex: 1 },
   
-  // STYLE SERTIFIKAT DIGITAL
-  certContainer: { backgroundColor: '#ffffff', padding: '20px', borderRadius: '8px', border: '1px solid #cbd5e1' },
-  certBorder: { border: '6px double #1e3a8a', padding: '25px', backgroundColor: '#fafaf9', position: 'relative' },
+  certBorder: { border: '6px double #1e3a8a', padding: '25px', backgroundColor: '#fafaf9' },
   certHeader: { textAlign: 'center' },
   certTitle: { color: '#1e3a8a', margin: '0', fontSize: '22px', letterSpacing: '1px' },
   certSub: { fontSize: '12px', color: '#64748b', margin: '5px 0' },
