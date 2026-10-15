@@ -4,7 +4,6 @@ export default function App() {
   const [userRole, setUserRole] = useState(null); // 'siswa', 'guru', 'mandiri'
   const [activeTab, setActiveTab] = useState('landing');
   
-  // API Key Simulasi Cerdas
   const [apiKey, setApiKey] = useState('');
   const [isApiValid, setIsApiValid] = useState(false);
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
@@ -101,22 +100,39 @@ export default function App() {
     localStorage.setItem(keys.submissions, JSON.stringify(submissions));
   }, [students, submissions, currentClass, allClasses, userRole]);
 
-  // Login Siswa
-  const [loginSelectedClassIndex, setLoginSelectedClassIndex] = useState('');
-  const [loginSelectedName, setLoginSelectedName] = useState('');
-  const [loginPin, setLoginPin] = useState('');
-  const [availableStudentsForLogin, setAvailableStudentsForLogin] = useState([]);
+  // Login Siswa Menggunakan Kode Akses Kelas (Bukan Pilih Guru)
+  const [classCodeInput, setClassCodeInput] = useState('');
+  const [loginStudentName, setLoginStudentName] = useState('');
+  const [loginStudentPin, setLoginStudentPin] = useState('');
+  const [resolvedStudentList, setResolvedStudentList] = useState([]);
 
-  useEffect(() => {
-    if (loginSelectedClassIndex !== '') {
-      const selectedClass = allClasses[loginSelectedClassIndex];
-      const keys = getStorageKeys(selectedClass, 'siswa');
-      const savedStudents = localStorage.getItem(keys.students);
-      setAvailableStudentsForLogin(savedStudents ? JSON.parse(savedStudents) : []);
+  // Cek dan validasi kode kelas yang dimasukkan siswa
+  const handleVerifyClassCode = (e) => {
+    e.preventDefault();
+    const foundClass = allClasses.find(c => c.pin === classCodeInput.trim());
+    if (foundClass) {
+      setCurrentClass(foundClass);
+      const keys = getStorageKeys(foundClass, 'siswa');
+      const savedStu = localStorage.getItem(keys.students);
+      setResolvedStudentList(savedStu ? JSON.parse(savedStu) : []);
+      alert(`✅ Kelas ${foundClass.subject} (${foundClass.teacher}) ditemukan! Silakan pilih nama Anda.`);
     } else {
-      setAvailableStudentsForLogin([]);
+      alert('❌ Kode Akses Kelas / PIN Guru salah.');
+      setCurrentClass(null);
     }
-  }, [loginSelectedClassIndex, allClasses]);
+  };
+
+  const handleStudentLoginFinal = (e) => {
+    e.preventDefault();
+    const student = resolvedStudentList.find(s => s.name === loginStudentName && s.pin === loginStudentPin);
+    if (student) {
+      setCurrentStudent(student);
+      setUserRole('siswa');
+      setActiveTab('introSiswa');
+    } else {
+      alert('❌ Nama atau PIN Siswa salah.');
+    }
+  };
 
   const handleRegisterOrLoginGuru = (e) => {
     e.preventDefault();
@@ -149,19 +165,6 @@ export default function App() {
     setActiveTab('guruDashboard');
   };
 
-  const handleStudentLogin = (e) => {
-    e.preventDefault();
-    const student = availableStudentsForLogin.find(s => s.name === loginSelectedName && s.pin === loginPin);
-    if (student) {
-      setCurrentClass(allClasses[loginSelectedClassIndex]);
-      setCurrentStudent(student);
-      setUserRole('siswa');
-      setActiveTab('introSiswa');
-    } else {
-      alert('❌ Nama atau PIN siswa salah.');
-    }
-  };
-
   const handleMandiriLogin = (e) => {
     e.preventDefault();
     setCurrentStudent({ id: 'mandiri-' + Date.now(), name: mandiriNameInput.trim() });
@@ -176,6 +179,7 @@ export default function App() {
     setUserRole(null);
     setIsApiValid(false);
     setActiveTab('landing');
+    setClassCodeInput('');
   };
 
   // Pelanggaran & Kanvas
@@ -199,7 +203,6 @@ export default function App() {
   const activePortfolio = submissions.find(s => s.id === activeSubmissionId);
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Minta Revisi';
 
-  // Validasi & Pemrosesan AI Cerdas (Bypass CORS Error dengan Simulasi Algoritma Nalar)
   const checkApiValidity = (e) => {
     e.preventDefault();
     const cleanKey = apiKey.trim();
@@ -280,7 +283,7 @@ export default function App() {
           <div style={styles.gridMenu}>
             <div style={styles.menuBox} onClick={() => setActiveTab('loginSiswa')}>
               <h3>Siswa</h3>
-              <p>Masuk ke ruang kelas terdaftar.</p>
+              <p>Masuk menggunakan kode kelas.</p>
             </div>
             <div style={styles.menuBox} onClick={() => setShowMandiriModal(true)}>
               <h3>Mandiri</h3>
@@ -294,34 +297,40 @@ export default function App() {
         </div>
       )}
 
-      {/* LOGIN SISWA */}
+      {/* LOGIN SISWA BERDASARKAN KODE AKSES KELAS */}
       {!userRole && activeTab === 'loginSiswa' && (
         <div style={styles.card} className="no-print">
           <button style={styles.backBtn} onClick={() => setActiveTab('landing')}>← Kembali</button>
-          <h2>Masuk Kelas</h2>
-          <form onSubmit={handleStudentLogin} style={styles.form}>
-            <label>Pilih Kelas / Guru:</label>
-            <select value={loginSelectedClassIndex} onChange={(e) => setLoginSelectedClassIndex(e.target.value)} style={styles.input} required>
-              <option value="" disabled>-- Pilih Kelas --</option>
-              {allClasses.map((c, i) => <option key={i} value={i}>{c.subject} ({c.teacher})</option>)}
-            </select>
-            {loginSelectedClassIndex !== '' && (
-              <>
-                <label>Nama Siswa:</label>
-                <select value={loginSelectedName} onChange={(e) => setLoginSelectedName(e.target.value)} style={styles.input} required>
-                  <option value="" disabled>-- Pilih Nama --</option>
-                  {availableStudentsForLogin.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                </select>
-                <label>PIN (4 Digit):</label>
-                <input type="password" value={loginPin} onChange={(e) => setLoginPin(e.target.value)} style={styles.input} required />
-                <button type="submit" style={styles.btnPrimary}>Masuk</button>
-              </>
-            )}
-          </form>
+          <h2>Akses Ruang Kelas</h2>
+          
+          {!currentClass ? (
+            <form onSubmit={handleVerifyClassCode} style={styles.form}>
+              <label>Masukkan Kode Akses / Sandi Kelas dari Guru:</label>
+              <input type="password" placeholder="Contoh: 2900" value={classCodeInput} onChange={(e) => setClassCodeInput(e.target.value)} style={styles.input} required />
+              <button type="submit" style={styles.btnPrimary}>Verifikasi Kode Kelas</button>
+            </form>
+          ) : (
+            <form onSubmit={handleStudentLoginFinal} style={styles.form}>
+              <div style={{background: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '13px', marginBottom: '10px'}}>
+                📚 Kelas: <b>{currentClass.subject}</b> ({currentClass.teacher})
+              </div>
+              <label>Pilih Nama Anda:</label>
+              <select value={loginStudentName} onChange={(e) => setLoginStudentName(e.target.value)} style={styles.input} required>
+                <option value="" disabled>-- Pilih Nama --</option>
+                {resolvedStudentList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+              </select>
+              <label>PIN Siswa (4 Digit):</label>
+              <input type="password" placeholder="Masukkan PIN..." value={loginStudentPin} onChange={(e) => setLoginStudentPin(e.target.value)} style={styles.input} required />
+              <div style={styles.modalActions}>
+                <button type="submit" style={styles.btnPrimary}>Masuk Kelas</button>
+                <button type="button" style={styles.textBtn} onClick={() => { setCurrentClass(null); setClassCodeInput(''); }}>Ganti Kode</button>
+              </div>
+            </form>
+          )}
         </div>
       )}
 
-      {/* MODAL SETUP / LOGIN GURU DENGAN SANDI */}
+      {/* MODAL SETUP / LOGIN GURU */}
       {showPinModal && (
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard}>
@@ -332,7 +341,7 @@ export default function App() {
               <input type="text" placeholder="Contoh: Bu Novi" value={teacherNameInput} onChange={(e) => setTeacherNameInput(e.target.value)} style={styles.input} required />
               <label>Mata Pelajaran:</label>
               <input type="text" placeholder="Contoh: Fisika" value={subjectInput} onChange={(e) => setSubjectInput(e.target.value)} style={styles.input} required />
-              <label>Sandi (PIN) Unik:</label>
+              <label>Sandi (PIN) Unik Kelas:</label>
               <input type="password" placeholder="Contoh: 2900" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} required />
               <div style={styles.modalActions}>
                 <button type="submit" style={styles.btnPrimary}>Akses Ruang</button>
@@ -477,7 +486,7 @@ export default function App() {
           <>
             {activeTab === 'guruDashboard' && (
               <div style={styles.card} className="no-print">
-                <h2>Evaluasi Kelas</h2>
+                <h2>Evaluasi Kelas ({currentClass?.subject})</h2>
                 {submissions.length === 0 ? <p style={{color: '#666', fontSize: '13px'}}>Belum ada tugas masuk.</p> : (
                   <table style={styles.table}>
                     <thead><tr><th>Siswa</th><th>Status</th><th>Aksi</th></tr></thead>
