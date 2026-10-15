@@ -178,7 +178,7 @@ export default function App() {
       setUserRole('guru');
       setShowPinModal(false);
       setPinInput('');
-      setActiveTab('guruDashboard');
+      setActiveTab('guruDashboard'); // Langsung lempar ke dashboard guru
     } else {
       alert('❌ PIN Guru Salah!');
       setPinInput('');
@@ -640,8 +640,8 @@ export default function App() {
           </>
         )}
 
-        {/* ALUR GURU */}
-        {userRole === 'guru' && isGuruAuthed && (
+        {/* ALUR GURU (Disini nih bug-nya udah gua cabut isGuruAuthed) */}
+        {userRole === 'guru' && (
           <>
             {activeTab === 'guruSiswa' && (
               <div style={styles.card} className="no-print">
