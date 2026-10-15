@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 // ==========================================
-// SESSION HELPER (Biar web kebal kalau di-refresh)
+// SESSION HELPER (Anti-Refresh)
 // ==========================================
 const session = {
   set: (key, val) => localStorage.setItem(key, JSON.stringify(val)),
@@ -13,7 +13,6 @@ const session = {
 };
 
 export default function App() {
-  // Ambil state dari memori biar gak ke-reset pas F5
   const [userRole, setUserRole] = useState(() => session.get('PENA_ROLE', null)); 
   const [activeTab, setActiveTab] = useState(() => session.get('PENA_TAB', 'landing'));
   const [currentClass, setCurrentClass] = useState(() => session.get('PENA_CLASS', null));
@@ -23,7 +22,6 @@ export default function App() {
   const [isApiValid, setIsApiValid] = useState(apiKey.length > 10);
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
 
-  // Simpan posisi terakhir pengguna ke storage otomatis
   useEffect(() => {
     session.set('PENA_ROLE', userRole);
     session.set('PENA_TAB', activeTab);
@@ -32,24 +30,21 @@ export default function App() {
     session.set('PENA_AI_KEY', apiKey);
   }, [userRole, activeTab, currentClass, currentStudent, apiKey]);
 
-  // Database Kelas & Guru 
   const [allClasses, setAllClasses] = useState(() => {
     try { const saved = localStorage.getItem('PENA_ALL_CLASSES'); return saved ? JSON.parse(saved) : []; } 
     catch (e) { return []; }
   });
 
-  // Modal Guru & Setup Sandi
   const [showPinModal, setShowPinModal] = useState(false);
   const [teacherNameInput, setTeacherNameInput] = useState('');
   const [subjectInput, setSubjectInput] = useState('');
   const [pinInput, setPinInput] = useState('');
 
-  // Modal Mandiri
   const [showMandiriModal, setShowMandiriModal] = useState(false);
   const [mandiriNameInput, setMandiriNameInput] = useState('');
 
   const getStorageKeys = (kelas, role) => {
-    if (role === 'mandiri') return { students: 'PENA_MANDIRI_STU_ISO', submissions: 'PENA_MANDIRI_SUB_ISO' };
+    if (role === 'mandiri') return { students: 'PENA_MDR_STU_ISO', submissions: 'PENA_MDR_SUB_ISO' };
     if (!kelas) return { students: 'PENA_STU_DEF', submissions: 'PENA_SUB_DEF' };
     const prefix = `PENA_${kelas.teacher}_${kelas.subject}_${kelas.pin}`.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
     return { students: `${prefix}_STU`, submissions: `${prefix}_SUB` };
@@ -58,7 +53,6 @@ export default function App() {
   const [students, setStudents] = useState([]);
   const [submissions, setSubmissions] = useState([]);
 
-  // Load Database Terisolasi Sesuai Sesi
   useEffect(() => {
     if (userRole === 'mandiri') {
       const keys = getStorageKeys(null, 'mandiri');
@@ -82,7 +76,6 @@ export default function App() {
     } catch (e) { console.error(e); }
   }, [currentClass, userRole]);
 
-  // Polling Sinkronisasi Realtime
   useEffect(() => {
     const interval = setInterval(() => {
       try {
@@ -106,7 +99,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentClass, userRole, allClasses, submissions, students]);
 
-  // Login Siswa Berdasarkan Kode Akses Kelas
   const [classCodeInput, setClassCodeInput] = useState('');
   const [loginStudentName, setLoginStudentName] = useState('');
   const [loginStudentPin, setLoginStudentPin] = useState('');
@@ -164,12 +156,26 @@ export default function App() {
     setActiveTab('guruDashboard');
   };
 
+  const handleDeleteClass = () => {
+    if(window.confirm('🚨 PERINGATAN: Yakin mau hapus kelas ini beserta SELURUH data siswa dan tugasnya?')) {
+      const updatedClasses = allClasses.filter(c => c.pin !== currentClass.pin);
+      setAllClasses(updatedClasses);
+      localStorage.setItem('PENA_ALL_CLASSES', JSON.stringify(updatedClasses));
+      
+      const keys = getStorageKeys(currentClass, 'guru');
+      localStorage.removeItem(keys.students);
+      localStorage.removeItem(keys.submissions);
+      
+      handleLogout();
+      alert('Kelas berhasil dihapus permanen.');
+    }
+  };
+
   const handleMandiriLogin = (e) => {
     e.preventDefault();
     const name = mandiriNameInput.trim();
     if (!name) return;
     
-    // Reset data sebelumnya agar tidak bocor
     setSubmissions([]);
     setStudents([]);
     
@@ -184,33 +190,33 @@ export default function App() {
     setCurrentStudent(null);
     setCurrentClass(null);
     setUserRole(null);
-    
-    // Reset array data lokal di UI
     setSubmissions([]);
     setStudents([]);
-    
     setIsApiValid(false);
     setActiveTab('landing');
     setClassCodeInput('');
   };
 
-  // Pelanggaran & Kanvas Nalar
+  // 9 INDIKATOR Kritis (Ennis) & Problem Solving (Polya)
   const [isPasted, setIsPasted] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [formData, setFormData] = useState({
-    naskahText: '', ennisIndicator: 'Penjelasan Sederhana', polyaStep: 'Memahami Masalah', deconstructionText: ''
+    naskahText: '', ennisIndicator: '1. Penjelasan Sederhana', polyaStep: '1. Memahami Masalah', deconstructionText: ''
   });
 
   const ennisPrompts = {
-    'Penjelasan Sederhana': 'Apakah argumen awal dari tulisanmu jelas dan bebas dari ambiguitas logika?',
-    'Keterampilan Dasar': 'Apakah sumber atau premis pendukung argumenmu memiliki kredibilitas terukur?',
-    'Menyimpulkan': 'Apakah kesimpulan ditarik secara valid berdasarkan bukti logis yang relevan?'
+    '1. Penjelasan Sederhana': 'Apakah argumen awal dari tulisanmu jelas, fokus, dan bebas dari ambiguitas logika?',
+    '2. Keterampilan Dasar': 'Apakah sumber, observasi, atau premis pendukung argumenmu memiliki kredibilitas yang terukur?',
+    '3. Menyimpulkan': 'Apakah kesimpulan ditarik secara valid melalui deduksi/induksi berdasarkan bukti yang relevan?',
+    '4. Penjelasan Lanjut': 'Apakah istilah-istilah kunci telah didefinisikan dan asumsi tersembunyi telah diidentifikasi?',
+    '5. Strategi & Taktik': 'Bagaimana keputusan tindakan atau taktik interaksimu dalam menghadapi argumen lawan?'
   };
 
   const polyaPrompts = {
-    'Memahami Masalah': 'Apa pokok permasalahan krusial yang sedang diuji dalam naskah ini?',
-    'Merencanakan Penyelesaian': 'Bagaimana strategimu meruntuhkan atau memperkuat klaim tersebut secara runtut?',
-    'Memeriksa Kembali': 'Jika ada pihak mengajukan sanggahan radikal, bagaimana pembelaan rasionalmu?'
+    '1. Memahami Masalah': 'Apa pokok permasalahan krusial atau variabel utama yang sedang diuji dalam naskah ini?',
+    '2. Merencanakan Penyelesaian': 'Bagaimana strategimu/pola logikamu untuk meruntuhkan atau memperkuat klaim tersebut?',
+    '3. Melaksanakan Rencana': 'Tuliskan eksekusi langkah demi langkah dari rencanamu dengan data atau penalaran yang akurat.',
+    '4. Memeriksa Kembali': 'Jika ada pihak yang mengajukan sanggahan radikal, bagaimana pembelaan rasional dan evaluasi ulangmu?'
   };
 
   useEffect(() => {
@@ -233,54 +239,67 @@ export default function App() {
     setActiveTab('workspace');
   };
 
-  const handleSubmitCanvas = (e) => {
+  // MESIN AI SUNGGUHAN (Fetch API Gemini)
+  const handleSubmitCanvas = async (e) => {
     e.preventDefault();
     if (!isApiValid) { alert('Masukkan API Key terlebih dahulu di tab 2.'); return; }
     setIsSubmittingTask(true);
 
-    setTimeout(() => {
-      let diagnosis = "";
-      const text = formData.deconstructionText.trim();
-      const wordCount = text.split(/\s+/).length;
-      const hasViolations = isPasted || tabSwitchCount > 0;
+    let diagnosis = "";
+    const text = formData.deconstructionText.trim();
+    const wordCount = text.split(/\s+/).length;
+    const hasViolations = isPasted || tabSwitchCount > 0;
 
-      if (hasViolations) {
-        diagnosis = `[GAGAL INTEGRITAS] Terdeteksi anomali (Pindah tab: ${tabSwitchCount}x, Copy-paste: ${isPasted ? 'Terdeteksi' : 'Tidak'}). Argumen didiskualifikasi karena indikasi manipulasi eksternal.`;
-      } else if (wordCount < 25) {
-        diagnosis = `[TIDAK LOLOS KRITIS] Penjabaran terlalu dangkal (${wordCount} kata). Gagal menjawab pertanyaan pemantik elaborasi. Diperlukan uraian kausalitas yang lebih mendalam.`;
-      } else if (text.toLowerCase().includes('gak tau') || text.toLowerCase().includes('asal')) {
-        diagnosis = `[DITOLAK] Respons terdeteksi tidak serius atau asal-asalan. Analisis nalar logis tidak terpenuhi sama sekali.`;
-      } else {
-        diagnosis = `[LOLOS KRITIS MENDALAM] Analisis otentik terverifikasi. Siswa berhasil menjawab pemantik konseptual ${formData.ennisIndicator} dengan eksekusi metodologis ${formData.polyaStep}. Argumen valid dan logis.`;
+    if (hasViolations) {
+      diagnosis = `[GAGAL INTEGRITAS] Terdeteksi anomali (Pindah tab: ${tabSwitchCount}x, Copy-paste: ${isPasted ? 'Terdeteksi' : 'Aman'}). Argumen didiskualifikasi.`;
+    } else if (wordCount < 25) {
+      diagnosis = `[TIDAK LOLOS KRITIS] Penjabaran terlalu dangkal (${wordCount} kata). Gagal menjawab pemantik elaborasi secara komprehensif.`;
+    } else if (text.toLowerCase().includes('gak tau') || text.toLowerCase().includes('asal')) {
+      diagnosis = `[DITOLAK] Respons tidak serius atau asal-asalan. Analisis nalar logis tidak terpenuhi.`;
+    } else {
+      try {
+        const prompt = `Sebagai evaluator pendidikan kritis, evaluasi argumen siswa berikut secara analitis.\nKutipan Masalah: "${formData.naskahText}"\nKerangka Ennis: ${formData.ennisIndicator}\nTahap Polya: ${formData.polyaStep}\nDekonstruksi Siswa: "${text}"\n\nBerikan diagnosis singkat (maksimal 3 kalimat) apakah argumen ini logis, tajam, dan berhasil menjawab kerangka tersebut.`;
+        
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        });
+        
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.message);
+        
+        diagnosis = `[HASIL EVALUASI AI] ${data.candidates[0].content.parts[0].text}`;
+      } catch (err) {
+        diagnosis = `[ERROR AI] Gagal menghubungi server Gemini: ${err.message}. Pastikan API Key valid atau kuota limit belum habis.`;
       }
+    }
 
-      const newSubmission = {
-        id: Date.now(),
-        certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}`,
-        studentName: currentStudent.name,
-        mode: userRole === 'mandiri' ? 'Mandiri (Privat)' : 'Tugas Kelas',
-        naskahText: formData.naskahText, 
-        ennis: formData.ennisIndicator, 
-        polya: formData.polyaStep, 
-        deconstructionText: formData.deconstructionText,
-        diagnosis, hasCopyPasted: isPasted, tabSwitches: tabSwitchCount,
-        timestamp: new Date().toLocaleString(),
-        status: userRole === 'mandiri' ? 'Disetujui Otomatis' : 'Pending Review Guru',
-        teacherFeedback: ''
-      };
-      
-      const filtered = submissions.filter(s => s.studentName !== currentStudent.name);
-      const updatedSubmissions = [newSubmission, ...filtered];
-      
-      setSubmissions(updatedSubmissions);
-      
-      // Force save ke localStorage
-      const keys = getStorageKeys(currentClass, userRole);
-      localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
+    const newSubmission = {
+      id: Date.now(),
+      certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}`,
+      studentName: currentStudent.name,
+      mode: userRole === 'mandiri' ? 'Mandiri (Privat)' : 'Tugas Kelas',
+      naskahText: formData.naskahText, 
+      ennis: formData.ennisIndicator, 
+      polya: formData.polyaStep, 
+      deconstructionText: formData.deconstructionText,
+      diagnosis, hasCopyPasted: isPasted, tabSwitches: tabSwitchCount,
+      timestamp: new Date().toLocaleString(),
+      status: userRole === 'mandiri' ? 'Disetujui Otomatis' : 'Pending Review Guru',
+      teacherFeedback: ''
+    };
+    
+    const filtered = submissions.filter(s => s.studentName !== currentStudent.name);
+    const updatedSubmissions = [newSubmission, ...filtered];
+    
+    setSubmissions(updatedSubmissions);
+    
+    const keys = getStorageKeys(currentClass, userRole);
+    localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
 
-      setIsPasted(false); setTabSwitchCount(0); setIsSubmittingTask(false);
-      setActiveTab('portfolio');
-    }, 900);
+    setIsPasted(false); setTabSwitchCount(0); setIsSubmittingTask(false);
+    setActiveTab('portfolio');
   };
 
   const [selectedSubmission, setSelectedSubmission] = useState(null);
@@ -290,12 +309,21 @@ export default function App() {
     const updatedSubmissions = submissions.map(item => item.id === id ? { ...item, status, teacherFeedback: teacherNoteInput } : item);
     setSubmissions(updatedSubmissions);
     
-    // Perbaikan: Paksa simpan detik itu juga biar guru ga ilang datanya
     const keys = getStorageKeys(currentClass, userRole);
     localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
     
     setSelectedSubmission(null);
     setTeacherNoteInput('');
+    alert(`Evaluasi berhasil disimpan sebagai: ${status}`);
+  };
+
+  const handleDeleteStudent = (id, name) => {
+    if(window.confirm(`Yakin mau menghapus siswa "${name}" dari daftar kelas ini?`)) {
+      const updatedStudents = students.filter(s => s.id !== id);
+      setStudents(updatedStudents);
+      const keys = getStorageKeys(currentClass, userRole);
+      localStorage.setItem(keys.students, JSON.stringify(updatedStudents));
+    }
   };
 
   return (
@@ -447,8 +475,8 @@ export default function App() {
                   <p style={{marginTop: 0}}><b>📚 Tata Cara Pengerjaan PENA Pilar Dua:</b></p>
                   <ul style={{lineHeight: '1.6', color: '#444', paddingLeft: '20px', marginBottom: 0}}>
                     <li><b>Pahami Konteks:</b> Baca naskah tugas dengan teliti sebelum memulai dekonstruksi argumen.</li>
-                    <li><b>Pilih Kerangka:</b> Tentukan indikator Ennis dan langkah Polya yang paling sesuai dengan arah nalar kritismu.</li>
-                    <li><b>Jaga Integritas:</b> Dilarang keras melakukan manipulasi seperti pindah tab pencarian atau <i>Copy-Paste</i> (kecuali kutipan). Sistem memantau penuh setiap pergerakan.</li>
+                    <li><b>Pilih 9 Kerangka:</b> Tentukan salah satu dari 5 indikator Ennis dan 4 langkah Polya yang paling sesuai dengan arah nalar kritismu.</li>
+                    <li><b>Jaga Integritas:</b> Dilarang keras melakukan manipulasi seperti pindah tab pencarian atau <i>Copy-Paste</i>. Sistem memantau pergerakan kursor.</li>
                     <li><b>Siapkan AI:</b> Masuk ke menu berikutnya untuk menghubungkan kunci API ke mesin evaluasi.</li>
                   </ul>
                 </div>
@@ -459,11 +487,29 @@ export default function App() {
             {activeTab === 'apiKey' && (
               <div style={styles.card} className="no-print">
                 <h2>Otentikasi Kunci AI</h2>
-                <form onSubmit={checkApiValidity}>
-                  <input type="password" placeholder="Masukkan kunci akses Gemini..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} required />
-                  <button type="submit" style={styles.btnPrimary}>Hubungkan Mesin</button>
+                <div style={{...styles.introBox, background: '#fefce8', borderColor: '#fef08a'}}>
+                  <p style={{margin: '0 0 8px 0'}}><b>⚠️ Kenapa harus masukin API Key sendiri?</b></p>
+                  <p style={{margin: 0, fontSize: '13px', color: '#555'}}>Mesin Google Gemini memiliki batas limit (kuota harian). Agar evaluasi tidak error atau gagal memproses, disarankan menggunakan kunci akses pribadi.</p>
+                  <hr style={{border: 0, borderTop: '1px solid #fde047', margin: '10px 0'}}/>
+                  <p style={{margin: '0 0 5px 0'}}><b>Cara Mendapatkan API Key Gratis:</b></p>
+                  <ol style={{margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#444', lineHeight: '1.6'}}>
+                    <li>Buka tab baru dan kunjungi: <b>aistudio.google.com/app/apikey</b></li>
+                    <li>Login dengan akun Google kamu.</li>
+                    <li>Klik tombol <b>Create API Key</b> (warna biru).</li>
+                    <li>Pilih <i>Create API key in new project</i>.</li>
+                    <li>Salin (Copy) teks panjang yang diawali huruf "AIzaSy..." dan tempelkan di kotak bawah ini.</li>
+                  </ol>
+                </div>
+
+                <form onSubmit={checkApiValidity} style={{marginTop: '15px'}}>
+                  <label style={{fontSize: '13px', fontWeight: 'bold'}}>Kunci Akses Gemini:</label>
+                  <input type="text" autoComplete="off" placeholder="AIzaSy..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{...styles.input, marginTop: '5px'}} required />
+                  <div style={{display: 'flex', gap: '10px', marginTop: '10px'}}>
+                    <button type="submit" style={styles.btnPrimary}>Hubungkan Mesin</button>
+                    {isApiValid && <button type="button" style={styles.btnSecondary} onClick={() => { setApiKey(''); setIsApiValid(false); }}>Hapus Key</button>}
+                  </div>
                 </form>
-                {isApiValid && <p style={{color: '#059669', fontSize: '13px', marginTop: '10px'}}>✅ Sistem analitis terhubung dan siap digunakan.</p>}
+                {isApiValid && <p style={{color: '#059669', fontSize: '13px', marginTop: '15px'}}>✅ Sistem analitis terhubung. Silakan lanjut ke tab Kanvas.</p>}
               </div>
             )}
 
@@ -477,7 +523,7 @@ export default function App() {
                 ) : (
                   <>
                     <h2>Kanvas Nalar</h2>
-                    {!isApiValid && <div style={{background: '#fef2f2', color: '#991b1b', padding: '10px', fontSize: '13px', marginBottom: '10px'}}>⚠️ Harap hubungkan kunci AI di tab sebelumnya terlebih dahulu.</div>}
+                    {!isApiValid && <div style={{background: '#fef2f2', color: '#991b1b', padding: '10px', fontSize: '13px', marginBottom: '10px', borderRadius: '4px'}}>⚠️ Harap hubungkan API Key di tab sebelumnya terlebih dahulu.</div>}
                     
                     <div style={styles.monitor}>
                       <span>Pindah Tab: <b>{tabSwitchCount}x</b></span>
@@ -490,13 +536,13 @@ export default function App() {
 
                       <div style={{display: 'flex', gap: '10px', margin: '10px 0'}}>
                         <div style={{flex: 1}}>
-                          <label>2. Kerangka Ennis:</label>
+                          <label>2. Kerangka Ennis (Pilih 1 dari 5):</label>
                           <select value={formData.ennisIndicator} onChange={(e) => setFormData({...formData, ennisIndicator: e.target.value})} style={styles.input}>
                             {Object.keys(ennisPrompts).map(k => <option key={k} value={k}>{k}</option>)}
                           </select>
                         </div>
                         <div style={{flex: 1}}>
-                          <label>3. Tahap Polya:</label>
+                          <label>3. Tahap Polya (Pilih 1 dari 4):</label>
                           <select value={formData.polyaStep} onChange={(e) => setFormData({...formData, polyaStep: e.target.value})} style={styles.input}>
                             {Object.keys(polyaPrompts).map(k => <option key={k} value={k}>{k}</option>)}
                           </select>
@@ -513,7 +559,7 @@ export default function App() {
                       <textarea rows="5" placeholder="Tuliskan argumen orisinalmu..." value={formData.deconstructionText} onChange={(e) => setFormData({...formData, deconstructionText: e.target.value})} onPaste={() => setIsPasted(true)} style={styles.textarea} required />
 
                       <button type="submit" style={styles.btnPrimary} disabled={!isApiValid || isSubmittingTask}>
-                        {isSubmittingTask ? 'Memproses Analisis AI...' : 'Kirim Tugas'}
+                        {isSubmittingTask ? 'Menganalisis dengan API...' : 'Kirim Tugas'}
                       </button>
                     </form>
                   </>
@@ -533,11 +579,11 @@ export default function App() {
                     <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
                     <p><b>Nama:</b> {activePortfolio.studentName}</p>
                     <p><b>Status Tugas:</b> <span style={{padding: '3px 8px', background: '#eee', borderRadius: '4px'}}>{activePortfolio.status}</span></p>
-                    <p><b>Metode:</b> Ennis ({activePortfolio.ennis}) & Polya ({activePortfolio.polya})</p>
+                    <p><b>Metode:</b> Ennis ({activePortfolio.ennis.split('.')[0]}) & Polya ({activePortfolio.polya.split('.')[0]})</p>
                     <p><b>Kutipan Kasus:</b> "{activePortfolio.naskahText}"</p>
                     <p><b>Resolusi & Dekonstruksi:</b> "{activePortfolio.deconstructionText}"</p>
                     <div style={{background: '#f9f9f9', padding: '10px', borderLeft: '3px solid #111', marginTop: '10px'}}>
-                      <p style={{margin: 0}}><b>Diagnosis Mesin AI:</b><br/>{activePortfolio.diagnosis}</p>
+                      <p style={{margin: 0, lineHeight: '1.5'}}><b>Diagnosis Mesin AI:</b><br/>{activePortfolio.diagnosis}</p>
                     </div>
                     {activePortfolio.teacherFeedback && (
                       <div style={{background: '#fef2f2', padding: '10px', borderLeft: '3px solid #dc2626', marginTop: '10px'}}>
@@ -555,7 +601,11 @@ export default function App() {
           <>
             {activeTab === 'guruDashboard' && (
               <div style={styles.card} className="no-print">
-                <h2>Dasbor Evaluasi Kelas ({currentClass?.subject})</h2>
+                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px'}}>
+                  <h2 style={{margin: 0}}>Dasbor Evaluasi Kelas ({currentClass?.subject})</h2>
+                  <button style={styles.btnDangerSmall} onClick={handleDeleteClass}>Hapus Kelas</button>
+                </div>
+                
                 {submissions.length === 0 ? <p style={{color: '#666', fontSize: '13px'}}>Belum ada tugas masuk dari siswa.</p> : (
                   <table style={styles.table}>
                     <thead><tr><th style={{textAlign: 'left'}}>Nama Siswa</th><th style={{textAlign: 'left'}}>Status</th><th>Aksi</th></tr></thead>
@@ -581,15 +631,26 @@ export default function App() {
                   const name = e.target.sName.value.trim();
                   if(name) {
                     const pin = Math.floor(1000 + Math.random() * 9000).toString();
-                    setStudents([...students, { id: Date.now(), name, pin }]);
+                    const newStudents = [...students, { id: Date.now(), name, pin }];
+                    setStudents(newStudents);
+                    
+                    const keys = getStorageKeys(currentClass, userRole);
+                    localStorage.setItem(keys.students, JSON.stringify(newStudents));
+                    
                     e.target.sName.value = ''; alert(`Siswa ditambahkan. Ingat berikan PIN ini ke siswa: ${pin}`);
                   }
                 }} style={{display: 'flex', gap: '8px', marginBottom: '15px'}}>
                   <input name="sName" type="text" placeholder="Masukkan nama siswa..." style={{...styles.input, margin: 0, flex: 1}} required />
                   <button type="submit" style={{...styles.btnPrimary, width: 'auto', margin: 0}}>Tambah</button>
                 </form>
-                <ul style={{paddingLeft: '15px', fontSize: '13px', color: '#444'}}>
-                  {students.map(s => <li key={s.id} style={{marginBottom: '5px'}}><b>{s.name}</b> (PIN Akses: <span style={{color: '#dc2626', fontWeight: 'bold'}}>{s.pin}</span>)</li>)}
+                
+                <ul style={{paddingLeft: 0, listStyle: 'none', fontSize: '13px', color: '#444'}}>
+                  {students.map(s => (
+                    <li key={s.id} style={{display: 'flex', justifyContent: 'space-between', padding: '8px', borderBottom: '1px solid #eee'}}>
+                      <span><b>{s.name}</b> (PIN Akses: <span style={{color: '#dc2626', fontWeight: 'bold'}}>{s.pin}</span>)</span>
+                      <button style={styles.btnDangerSmall} onClick={() => handleDeleteStudent(s.id, s.name)}>Hapus</button>
+                    </li>
+                  ))}
                 </ul>
               </div>
             )}
@@ -601,7 +662,7 @@ export default function App() {
                   <div style={{fontSize: '13px', background: '#f9f9f9', padding: '15px', borderRadius: '6px', margin: '10px 0', maxHeight: '280px', overflowY: 'auto', border: '1px solid #e5e5e5'}}>
                     <p style={{margin: '0 0 5px 0'}}><b>👤 Nama Siswa:</b> {selectedSubmission.studentName}</p>
                     <p style={{margin: '0 0 5px 0'}}><b>🕒 Waktu Submit:</b> {selectedSubmission.timestamp}</p>
-                    <p style={{margin: '0 0 10px 0'}}><b>📌 Indikator:</b> Ennis ({selectedSubmission.ennis}) & Polya ({selectedSubmission.polya})</p>
+                    <p style={{margin: '0 0 10px 0'}}><b>📌 Indikator:</b> Ennis ({selectedSubmission.ennis.split('.')[0]}) & Polya ({selectedSubmission.polya.split('.')[0]})</p>
                     <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
                     <p><b>Kutipan Naskah:</b> <br/><i>"{selectedSubmission.naskahText}"</i></p>
                     <p><b>Uraian Dekonstruksi:</b> <br/>"{selectedSubmission.deconstructionText}"</p>
@@ -642,8 +703,9 @@ const styles = {
   input: { width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '14px', boxSizing: 'border-box' },
   textarea: { width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '14px', boxSizing: 'border-box', resize: 'vertical' },
   btnPrimary: { background: '#111', color: '#fff', border: 'none', padding: '12px', borderRadius: '4px', fontWeight: '600', cursor: 'pointer', width: '100%', fontSize: '14px' },
-  btnSecondary: { background: '#555', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' },
+  btnSecondary: { background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', padding: '12px', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' },
   btnDanger: { background: '#dc2626', color: '#fff', border: 'none', padding: '12px', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '14px' },
+  btnDangerSmall: { background: '#fee2e2', color: '#b91c1c', border: '1px solid #f87171', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '12px' },
   btnTable: { background: '#111', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
   textBtn: { background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '14px', textDecoration: 'underline', padding: '10px' },
   backBtn: { background: 'none', border: 'none', color: '#111', cursor: 'pointer', fontSize: '13px', marginBottom: '15px', padding: 0, fontWeight: '600' },
