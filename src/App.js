@@ -1,51 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 
 // ==========================================
-// 1. FIREBASE SETUP (PASTE CONFIG LU DI SINI)
-// ==========================================
-const firebaseConfig = {
-  apiKey: "AIzaSyAITcwanrRvdAr9FSdrQr-otRujZhGQs00",
-  authDomain: "pertanggungjawaban-nalar.firebaseapp.com",
-  projectId: "pertanggungjawaban-nalar",
-  storageBucket: "pertanggungjawaban-nalar.firebasestorage.app",
-  messagingSenderId: "1351310726213",
-  appId: "1:351310726213:web:fbc826b633efc189bf8f2c"
-};
-
-let app, db;
-try {
-  app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
-} catch (error) {
-  console.error("Firebase belum di-config dengan benar:", error);
-}
-
-// ==========================================
-// 2. SESSION HELPER (Biar Tahan Refresh)
+// SESSION HELPER (Biar web kebal kalau di-refresh)
 // ==========================================
 const session = {
   set: (key, val) => localStorage.setItem(key, JSON.stringify(val)),
   get: (key, fallback) => {
-    try { const item = localStorage.getItem(key); return item ? JSON.parse(item) : fallback; } 
+    try { const item = localStorage.getItem(key); return item ? JSON.parse(item) : fallback; }
     catch (e) { return fallback; }
   },
   clear: () => ['PENA_ROLE', 'PENA_TAB', 'PENA_CLASS', 'PENA_STUDENT', 'PENA_AI_KEY'].forEach(k => localStorage.removeItem(k))
 };
 
-// ==========================================
-// 3. MAIN APP CONTAINER
-// ==========================================
 export default function App() {
-  // Ambil state dari memori (kalau di-refresh tetep inget)
-  const [userRole, setUserRole] = useState(() => session.get('PENA_ROLE', null));
+  // Ambil state dari memori biar gak ke-reset pas F5
+  const [userRole, setUserRole] = useState(() => session.get('PENA_ROLE', null)); 
   const [activeTab, setActiveTab] = useState(() => session.get('PENA_TAB', 'landing'));
   const [currentClass, setCurrentClass] = useState(() => session.get('PENA_CLASS', null));
   const [currentStudent, setCurrentStudent] = useState(() => session.get('PENA_STUDENT', null));
   const [apiKey, setApiKey] = useState(() => session.get('PENA_AI_KEY', ''));
+  
+  const [isApiValid, setIsApiValid] = useState(apiKey.length > 10);
+  const [isSubmittingTask, setIsSubmittingTask] = useState(false);
 
-  // Auto-save tiap kali ada state yang berubah
+  // Simpan posisi terakhir pengguna ke storage otomatis
   useEffect(() => {
     session.set('PENA_ROLE', userRole);
     session.set('PENA_TAB', activeTab);
@@ -54,14 +32,259 @@ export default function App() {
     session.set('PENA_AI_KEY', apiKey);
   }, [userRole, activeTab, currentClass, currentStudent, apiKey]);
 
-  const handleLogout = () => {
-    session.clear();
-    setUserRole(null); setActiveTab('landing');
-    setCurrentClass(null); setCurrentStudent(null);
+  // Database Kelas & Guru 
+  const [allClasses, setAllClasses] = useState(() => {
+    try { const saved = localStorage.getItem('PENA_ALL_CLASSES'); return saved ? JSON.parse(saved) : []; } 
+    catch (e) { return []; }
+  });
+
+  // Modal Guru & Setup Sandi
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [teacherNameInput, setTeacherNameInput] = useState('');
+  const [subjectInput, setSubjectInput] = useState('');
+  const [pinInput, setPinInput] = useState('');
+
+  // Modal Mandiri
+  const [showMandiriModal, setShowMandiriModal] = useState(false);
+  const [mandiriNameInput, setMandiriNameInput] = useState('');
+
+  const getStorageKeys = (kelas, role) => {
+    if (role === 'mandiri') return { students: 'PENA_MANDIRI_STU_ISOLATED', submissions: 'PENA_MANDIRI_SUB_ISOLATED' };
+    if (!kelas) return { students: 'PENA_STU_DEFAULT', submissions: 'PENA_SUB_DEFAULT' };
+    const prefix = `PENA_${kelas.teacher}_${kelas.subject}_${kelas.pin}`.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
+    return { students: `${prefix}_STUDENTS`, submissions: `${prefix}_SUBMISSIONS` };
   };
 
-  // Warning UI kalau Firebase belum diisi
-  if (!db) return <div style={{padding: 20, textAlign:'center'}}><h2>Menunggu Konfigurasi Firebase...</h2><p>Pastikan firebaseConfig di App.js sudah diisi.</p></div>;
+  const [students, setStudents] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
+
+  // Load Database Terisolasi Sesuai Sesi
+  useEffect(() => {
+    if (userRole === 'mandiri') {
+      const keys = getStorageKeys(null, 'mandiri');
+      const savedSub = localStorage.getItem(keys.submissions);
+      setSubmissions(savedSub ? JSON.parse(savedSub) : []);
+      return;
+    }
+    if (!currentClass) return;
+    
+    const keys = getStorageKeys(currentClass, userRole);
+    try {
+      const savedStudents = localStorage.getItem(keys.students);
+      if (savedStudents) { setStudents(JSON.parse(savedStudents)); } 
+      else if (userRole === 'guru') {
+        const defaultStudents = [{ id: 1, name: 'Siswa Contoh', pin: '1234' }];
+        setStudents(defaultStudents);
+        localStorage.setItem(keys.students, JSON.stringify(defaultStudents));
+      }
+      const savedSub = localStorage.getItem(keys.submissions);
+      setSubmissions(savedSub ? JSON.parse(savedSub) : []);
+    } catch (e) { console.error(e); }
+  }, [currentClass, userRole]);
+
+  // Polling Sinkronisasi Realtime (Sesuai kode awal lu)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      try {
+        const savedClasses = localStorage.getItem('PENA_ALL_CLASSES');
+        if (savedClasses && JSON.stringify(allClasses) !== savedClasses) {
+          setAllClasses(JSON.parse(savedClasses));
+        }
+        const keys = getStorageKeys(currentClass, userRole);
+        const savedSub = localStorage.getItem(keys.submissions);
+        if (savedSub && JSON.stringify(submissions) !== savedSub) {
+          setSubmissions(JSON.parse(savedSub));
+        }
+        if (userRole !== 'mandiri' && currentClass) {
+          const savedStu = localStorage.getItem(keys.students);
+          if (savedStu && JSON.stringify(students) !== savedStu) {
+            setStudents(JSON.parse(savedStu));
+          }
+        }
+      } catch (err) {}
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [currentClass, userRole, allClasses, submissions, students]);
+
+  useEffect(() => {
+    localStorage.setItem('PENA_ALL_CLASSES', JSON.stringify(allClasses));
+    const keys = getStorageKeys(currentClass, userRole);
+    if (userRole !== 'mandiri' && currentClass) {
+      localStorage.setItem(keys.students, JSON.stringify(students));
+    }
+    localStorage.setItem(keys.submissions, JSON.stringify(submissions));
+  }, [students, submissions, currentClass, allClasses, userRole]);
+
+  // Login Siswa Berdasarkan Kode Akses Kelas
+  const [classCodeInput, setClassCodeInput] = useState('');
+  const [loginStudentName, setLoginStudentName] = useState('');
+  const [loginStudentPin, setLoginStudentPin] = useState('');
+  const [resolvedStudentList, setResolvedStudentList] = useState([]);
+
+  const handleVerifyClassCode = (e) => {
+    e.preventDefault();
+    const foundClass = allClasses.find(c => c.pin === classCodeInput.trim());
+    if (foundClass) {
+      setCurrentClass(foundClass);
+      const keys = getStorageKeys(foundClass, 'siswa');
+      const savedStu = localStorage.getItem(keys.students);
+      setResolvedStudentList(savedStu ? JSON.parse(savedStu) : []);
+      alert(`✅ Kelas ${foundClass.subject} (${foundClass.teacher}) ditemukan! Silakan masukkan nama dan PIN Anda.`);
+    } else {
+      alert('❌ Kode Akses Kelas / PIN Guru salah.');
+      setCurrentClass(null);
+    }
+  };
+
+  // Mekanisme Keamanan Login Siswa (Manual Input + Typo Tolerance)
+  const handleStudentLoginFinal = (e) => {
+    e.preventDefault();
+    const inputName = loginStudentName.trim().toLowerCase();
+    const inputPin = loginStudentPin.trim();
+
+    const student = resolvedStudentList.find(s => s.name.trim().toLowerCase() === inputName && s.pin === inputPin);
+    if (student) {
+      setCurrentStudent(student);
+      setUserRole('siswa');
+      setActiveTab('introSiswa');
+    } else {
+      alert('❌ Nama atau PIN Siswa salah. Pastikan ejaan sesuai pendaftaran guru.');
+    }
+  };
+
+  const handleRegisterOrLoginGuru = (e) => {
+    e.preventDefault();
+    const tName = teacherNameInput.trim();
+    const sName = subjectInput.trim();
+    const pin = pinInput.trim();
+    if (!tName || !sName || !pin) { alert('Semua kolom wajib diisi!'); return; }
+    
+    let targetClass = allClasses.find(c => c.teacher.toLowerCase() === tName.toLowerCase() && c.subject.toLowerCase() === sName.toLowerCase());
+    if (targetClass) {
+      if (targetClass.pin !== pin) { alert('❌ Sandi (PIN) guru salah untuk akun ini!'); return; }
+    } else {
+      targetClass = { teacher: tName, subject: sName, pin: pin };
+      const updated = [...allClasses, targetClass];
+      setAllClasses(updated);
+      localStorage.setItem('PENA_ALL_CLASSES', JSON.stringify(updated));
+    }
+    setCurrentClass(targetClass);
+    setUserRole('guru');
+    setShowPinModal(false);
+    setActiveTab('guruDashboard');
+  };
+
+  const handleMandiriLogin = (e) => {
+    e.preventDefault();
+    const name = mandiriNameInput.trim();
+    if (!name) return;
+    setCurrentStudent({ id: 'mandiri-' + Date.now(), name });
+    setUserRole('mandiri');
+    setShowMandiriModal(false);
+    setActiveTab('introSiswa');
+  };
+
+  const handleLogout = () => {
+    session.clear(); // Bersihkan ingatan refresh
+    setCurrentStudent(null);
+    setCurrentClass(null);
+    setUserRole(null);
+    setIsApiValid(false);
+    setActiveTab('landing');
+    setClassCodeInput('');
+  };
+
+  // Pelanggaran & Kanvas Nalar dengan Pemantik Elaborasi
+  const [isPasted, setIsPasted] = useState(false);
+  const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const [formData, setFormData] = useState({
+    naskahText: '', ennisIndicator: 'Penjelasan Sederhana', polyaStep: 'Memahami Masalah', deconstructionText: ''
+  });
+
+  const ennisPrompts = {
+    'Penjelasan Sederhana': 'Apakah argumen awal dari tulisanmu jelas dan bebas dari ambiguitas logika?',
+    'Keterampilan Dasar': 'Apakah sumber atau premis pendukung argumenmu memiliki kredibilitas terukur?',
+    'Menyimpulkan': 'Apakah kesimpulan ditarik secara valid berdasarkan bukti logis yang relevan?'
+  };
+
+  const polyaPrompts = {
+    'Memahami Masalah': 'Apa pokok permasalahan krusial yang sedang diuji dalam naskah ini?',
+    'Merencanakan Penyelesaian': 'Bagaimana strategimu meruntuhkan atau memperkuat klaim tersebut secara runtut?',
+    'Memeriksa Kembali': 'Jika ada pihak mengajukan sanggahan radikal, bagaimana pembelaan rasionalmu?'
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'workspace' || !currentStudent) return;
+    const handleVisibilityChange = () => { if (document.hidden) setTabSwitchCount(prev => prev + 1); };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [activeTab, currentStudent]);
+
+  const activeSubmissionId = submissions.find(s => s.studentName === currentStudent?.name)?.id;
+  const activePortfolio = submissions.find(s => s.id === activeSubmissionId);
+  const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Minta Revisi';
+
+  const checkApiValidity = (e) => {
+    e.preventDefault();
+    const cleanKey = apiKey.trim();
+    if (cleanKey.length < 10) { alert('❌ API Key tidak valid.'); return; }
+    setIsApiValid(true);
+    setApiKey(cleanKey);
+    setActiveTab('workspace');
+  };
+
+  // Mesin Analisis Kritis AI (Simulasi Dummy Sesuai Kode Awal)
+  const handleSubmitCanvas = (e) => {
+    e.preventDefault();
+    if (!isApiValid) { alert('Masukkan API Key terlebih dahulu di tab 2.'); return; }
+    setIsSubmittingTask(true);
+
+    setTimeout(() => {
+      let diagnosis = "";
+      const text = formData.deconstructionText.trim();
+      const wordCount = text.split(/\s+/).length;
+      const hasViolations = isPasted || tabSwitchCount > 0;
+
+      if (hasViolations) {
+        diagnosis = `[GAGAL INTEGRITAS] Terdeteksi anomali (Pindah tab: ${tabSwitchCount}x, Copy-paste: ${isPasted ? 'Terdeteksi' : 'Tidak'}). Argumen didiskualifikasi karena indikasi manipulasi eksternal.`;
+      } else if (wordCount < 25) {
+        diagnosis = `[TIDAK LOLOS KRITIS] Penjabaran terlalu dangkal (${wordCount} kata). Gagal menjawab pertanyaan pemantik elaborasi kerangka ${formData.ennisIndicator} & tahap ${formData.polyaStep}. Diperlukan uraian kausalitas yang lebih mendalam.`;
+      } else if (text.toLowerCase().includes('gak tau') || text.toLowerCase().includes('asal')) {
+        diagnosis = `[DITOLAK] Respons terdeteksi tidak serius atau asal-asalan. Analisis nalar logis tidak terpenuhi sama sekali.`;
+      } else {
+        diagnosis = `[LOLOS KRITIS MENDALAM] Analisis otentik terverifikasi. Siswa berhasil menjawab pemantik konseptual ${formData.ennisIndicator} dengan eksekusi metodologis ${formData.polyaStep}. Argumen valid, logis, dan dapat dipertanggungjawabkan.`;
+      }
+
+      const newSubmission = {
+        id: Date.now(),
+        certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}`,
+        studentName: currentStudent.name,
+        mode: userRole === 'mandiri' ? 'Mandiri (Privat)' : 'Tugas Kelas',
+        naskahText: formData.naskahText, 
+        ennis: formData.ennisIndicator, 
+        polya: formData.polyaStep, 
+        deconstructionText: formData.deconstructionText,
+        diagnosis, hasCopyPasted: isPasted, tabSwitches: tabSwitchCount,
+        timestamp: new Date().toLocaleString(),
+        status: userRole === 'mandiri' ? 'Disetujui Otomatis' : 'Pending Review Guru',
+        teacherFeedback: ''
+      };
+      
+      const filtered = submissions.filter(s => s.studentName !== currentStudent.name);
+      setSubmissions([newSubmission, ...filtered]);
+      setIsPasted(false); setTabSwitchCount(0); setIsSubmittingTask(false);
+      setActiveTab('portfolio');
+    }, 900);
+  };
+
+  const [selectedSubmission, setSelectedSubmission] = useState(null);
+  const [teacherNoteInput, setTeacherNoteInput] = useState('');
+
+  const handleTeacherAction = (id, status) => {
+    setSubmissions(prev => prev.map(item => item.id === id ? { ...item, status, teacherFeedback: teacherNoteInput } : item));
+    setSelectedSubmission(null);
+    setTeacherNoteInput('');
+  };
 
   return (
     <div style={styles.appContainer}>
@@ -69,8 +292,8 @@ export default function App() {
         @page { size: A4 portrait; margin: 10mm; }
         @media print { 
           body * { visibility: hidden; } 
-          #certPrintArea, #certPrintArea * { visibility: visible; }
-          #certPrintArea { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; padding: 5mm; background: white !important; }
+          #certPrintArea, #certPrintArea * { visibility: visible; } 
+          #certPrintArea { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; padding: 5mm; background: white !important; } 
           .no-print { display: none !important; } 
         }
       `}} />
@@ -80,491 +303,294 @@ export default function App() {
         {userRole && <button style={styles.textBtn} onClick={handleLogout}>Keluar</button>}
       </header>
 
-      {!userRole && <LandingPage setActiveTab={setActiveTab} />}
+      {/* LANDING PAGE */}
+      {!userRole && activeTab === 'landing' && (
+        <div style={styles.card} className="no-print">
+          <h1 style={styles.title}>PENA</h1>
+          <p style={styles.subtitle}>Platform Pertanggungjawaban Nalar & Evaluasi Kritis</p>
+          <div style={styles.gridMenu}>
+            <div style={styles.menuBox} onClick={() => setActiveTab('loginSiswa')}>
+              <h3>Siswa</h3><p>Masuk menggunakan kode kelas.</p>
+            </div>
+            <div style={styles.menuBox} onClick={() => setShowMandiriModal(true)}>
+              <h3>Mandiri</h3><p>Simulasi latihan personal (Isolasi).</p>
+            </div>
+            <div style={styles.menuBox} onClick={() => setShowPinModal(true)}>
+              <h3>Guru</h3><p>Kelola kelas & evaluasi.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LOGIN SISWA BERDASARKAN KODE AKSES KELAS */}
       {!userRole && activeTab === 'loginSiswa' && (
-        <LoginSiswa db={db} setCurrentClass={setCurrentClass} setCurrentStudent={setCurrentStudent} setUserRole={setUserRole} setActiveTab={setActiveTab} />
-      )}
-      {!userRole && activeTab === 'loginGuru' && (
-        <LoginGuru db={db} setCurrentClass={setCurrentClass} setUserRole={setUserRole} setActiveTab={setActiveTab} />
-      )}
-      {!userRole && activeTab === 'loginMandiri' && (
-        <LoginMandiri setCurrentStudent={setCurrentStudent} setUserRole={setUserRole} setActiveTab={setActiveTab} />
-      )}
-
-      {userRole && (
-        <>
-          <NavigationBar userRole={userRole} activeTab={activeTab} setActiveTab={setActiveTab} currentClass={currentClass} />
+        <div style={styles.card} className="no-print">
+          <button style={styles.backBtn} onClick={() => setActiveTab('landing')}>← Kembali</button>
+          <h2>Akses Ruang Kelas</h2>
           
-          <main style={styles.main}>
-            {(userRole === 'siswa' || userRole === 'mandiri') && (
-              <>
-                {activeTab === 'introSiswa' && <IntroSiswa setActiveTab={setActiveTab} name={currentStudent?.name} />}
-                {activeTab === 'apiKey' && <ApiKeySetup apiKey={apiKey} setApiKey={setApiKey} setActiveTab={setActiveTab} />}
-                {activeTab === 'workspace' && (
-                  <KanvasWorkspace db={db} apiKey={apiKey} currentStudent={currentStudent} currentClass={currentClass} userRole={userRole} setActiveTab={setActiveTab} />
+          {!currentClass ? (
+            <form onSubmit={handleVerifyClassCode} style={styles.form}>
+              <label>Masukkan Kode Akses / Sandi Kelas dari Guru:</label>
+              <input type="password" placeholder="Contoh: 2900" value={classCodeInput} onChange={(e) => setClassCodeInput(e.target.value)} style={styles.input} required />
+              <button type="submit" style={styles.btnPrimary}>Verifikasi Kode Kelas</button>
+            </form>
+          ) : (
+            <form onSubmit={handleStudentLoginFinal} style={styles.form}>
+              <div style={{background: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '13px', marginBottom: '10px'}}>
+                📚 Kelas: <b>{currentClass.subject}</b> ({currentClass.teacher})
+              </div>
+              <label>Ketik Nama Anda (Manual):</label>
+              <input type="text" placeholder="Masukkan nama..." value={loginStudentName} onChange={(e) => setLoginStudentName(e.target.value)} style={styles.input} required />
+              
+              <label>PIN Siswa (4 Digit):</label>
+              <input type="password" placeholder="Masukkan PIN..." value={loginStudentPin} onChange={(e) => setLoginStudentPin(e.target.value)} style={styles.input} required />
+              
+              <div style={styles.modalActions}>
+                <button type="submit" style={styles.btnPrimary}>Masuk Kelas</button>
+                <button type="button" style={styles.textBtn} onClick={() => { setCurrentClass(null); setClassCodeInput(''); }}>Ganti Kode</button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* MODAL SETUP / LOGIN GURU */}
+      {showPinModal && (
+        <div style={styles.modalOverlay} className="no-print">
+          <div style={styles.modalCard}>
+            <h3>Otorisasi Guru</h3>
+            <p style={{fontSize: '12px', color: '#666'}}>Masukkan nama, mapel, dan sandi (PIN) unik kelas Anda.</p>
+            <form onSubmit={handleRegisterOrLoginGuru}>
+              <label>Nama Guru:</label>
+              <input type="text" placeholder="Contoh: Bu Novi" value={teacherNameInput} onChange={(e) => setTeacherNameInput(e.target.value)} style={styles.input} required />
+              <label>Mata Pelajaran:</label>
+              <input type="text" placeholder="Contoh: Fisika" value={subjectInput} onChange={(e) => setSubjectInput(e.target.value)} style={styles.input} required />
+              <label>Sandi (PIN) Unik Kelas:</label>
+              <input type="password" placeholder="Contoh: 2900" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} required />
+              <div style={styles.modalActions}>
+                <button type="submit" style={styles.btnPrimary}>Akses Ruang</button>
+                <button type="button" style={styles.textBtn} onClick={() => setShowPinModal(false)}>Batal</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL MANDIRI */}
+      {showMandiriModal && (
+        <div style={styles.modalOverlay} className="no-print">
+          <div style={styles.modalCard}>
+            <h3>Mode Mandiri (Terisolasi)</h3>
+            <form onSubmit={handleMandiriLogin}>
+              <label>Nama:</label>
+              <input type="text" placeholder="Masukkan nama..." value={mandiriNameInput} onChange={(e) => setMandiriNameInput(e.target.value)} style={styles.input} required />
+              <div style={styles.modalActions}>
+                <button type="submit" style={styles.btnPrimary}>Mulai</button>
+                <button type="button" style={styles.textBtn} onClick={() => setShowMandiriModal(false)}>Batal</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* NAVIGASI UTAMA */}
+      {userRole && (
+        <nav style={styles.navBar} className="no-print">
+          {(userRole === 'siswa' || userRole === 'mandiri') && (
+            <>
+              <span style={styles.navBadge}>{userRole === 'mandiri' ? 'Mandiri' : currentClass?.subject}</span>
+              <button style={activeTab === 'introSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('introSiswa')}>Instruksi</button>
+              <button style={activeTab === 'apiKey' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('apiKey')}>AI Key</button>
+              <button style={activeTab === 'workspace' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('workspace')}>Kanvas</button>
+              <button style={activeTab === 'portfolio' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('portfolio')}>Portofolio</button>
+            </>
+          )}
+          {userRole === 'guru' && (
+            <>
+              <span style={styles.navBadge}>{currentClass?.subject} ({currentClass?.teacher})</span>
+              <button style={activeTab === 'guruDashboard' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruDashboard')}>Evaluasi</button>
+              <button style={activeTab === 'guruSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruSiswa')}>Daftar Siswa</button>
+            </>
+          )}
+        </nav>
+      )}
+
+      <main style={styles.main}>
+        {(userRole === 'siswa' || userRole === 'mandiri') && currentStudent && (
+          <>
+            {activeTab === 'introSiswa' && (
+              <div style={styles.card} className="no-print">
+                <h2>Halo, {currentStudent.name}.</h2>
+                <p style={{color: '#555', lineHeight: '1.6'}}>Pastikan naskah dan argumen dikerjakan secara otentik. Sistem memantau perpindahan tab dan integritas teks tulisan.</p>
+                <button style={styles.btnPrimary} onClick={() => setActiveTab('apiKey')}>Lanjut ke Setup AI →</button>
+              </div>
+            )}
+
+            {activeTab === 'apiKey' && (
+              <div style={styles.card} className="no-print">
+                <h2>Otentikasi Kunci AI</h2>
+                <form onSubmit={checkApiValidity}>
+                  <input type="password" placeholder="Masukkan kunci akses..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} required />
+                  <button type="submit" style={styles.btnPrimary}>Hubungkan</button>
+                </form>
+                {isApiValid && <p style={{color: '#059669', fontSize: '13px', marginTop: '10px'}}>Terhubung dengan sistem analitis.</p>}
+              </div>
+            )}
+
+            {activeTab === 'workspace' && (
+              <div style={styles.card} className="no-print">
+                {isWorkspaceLocked ? (
+                  <div style={{textAlign: 'center', padding: '30px'}}>
+                    <h3>Tugas Telah Dikirim</h3>
+                    <p style={{color: '#666'}}>Silakan periksa tab Portofolio untuk melihat status validasi.</p>
+                  </div>
+                ) : (
+                  <>
+                    <h2>Kanvas Nalar</h2>
+                    {!isApiValid && <div style={{background: '#fef2f2', color: '#991b1b', padding: '10px', fontSize: '13px', marginBottom: '10px'}}>Hubungkan kunci AI di tab sebelumnya terlebih dahulu.</div>}
+                    
+                    <div style={styles.monitor}>
+                      <span>Pindah Tab: <b>{tabSwitchCount}x</b></span>
+                      <span>Copy-Paste: <b>{isPasted ? 'Terdeteksi' : 'Aman'}</b></span>
+                    </div>
+
+                    <form onSubmit={handleSubmitCanvas}>
+                      <label>1. Kutipan Naskah Utama:</label>
+                      <textarea rows="3" value={formData.naskahText} onChange={(e) => setFormData({...formData, naskahText: e.target.value})} style={styles.textarea} required />
+
+                      <div style={{display: 'flex', gap: '10px', margin: '10px 0'}}>
+                        <div style={{flex: 1}}>
+                          <label>2. Kerangka Ennis:</label>
+                          <select value={formData.ennisIndicator} onChange={(e) => setFormData({...formData, ennisIndicator: e.target.value})} style={styles.input}>
+                            {Object.keys(ennisPrompts).map(k => <option key={k} value={k}>{k}</option>)}
+                          </select>
+                        </div>
+                        <div style={{flex: 1}}>
+                          <label>3. Tahap Polya:</label>
+                          <select value={formData.polyaStep} onChange={(e) => setFormData({...formData, polyaStep: e.target.value})} style={styles.input}>
+                            {Object.keys(polyaPrompts).map(k => <option key={k} value={k}>{k}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div style={styles.promptBox}>
+                        <p style={{margin: '0 0 4px 0', fontWeight: 'bold'}}>💡 Pemantik Konteks Wajib:</p>
+                        <p style={{margin: 0, color: '#333'}}>{ennisPrompts[formData.ennisIndicator]}</p>
+                        <p style={{margin: '4px 0 0 0', color: '#333'}}>{polyaPrompts[formData.polyaStep]}</p>
+                      </div>
+
+                      <label style={{marginTop: '10px', display: 'block'}}>4. Uraian Pemikiran Kritis (Jawab elaborasi di atas):</label>
+                      <textarea rows="5" value={formData.deconstructionText} onChange={(e) => setFormData({...formData, deconstructionText: e.target.value})} onPaste={() => setIsPasted(true)} style={styles.textarea} required />
+
+                      <button type="submit" style={styles.btnPrimary} disabled={!isApiValid || isSubmittingTask}>
+                        {isSubmittingTask ? 'Memproses Analisis...' : 'Kirim Tugas'}
+                      </button>
+                    </form>
+                  </>
                 )}
-                {activeTab === 'portfolio' && <Portofolio db={db} currentStudent={currentStudent} currentClass={currentClass} />}
-              </>
+              </div>
             )}
 
-            {userRole === 'guru' && currentClass && (
-              <>
-                {activeTab === 'guruDashboard' && <GuruDashboard db={db} currentClass={currentClass} />}
-                {activeTab === 'guruSiswa' && <GuruSiswa db={db} currentClass={currentClass} />}
-              </>
+            {activeTab === 'portfolio' && (
+              <div>
+                <div style={{marginBottom: '10px'}} className="no-print">
+                  <button style={styles.btnSecondary} onClick={() => window.print()}>Cetak / Simpan PDF</button>
+                </div>
+                {activePortfolio ? (
+                  <div id="certPrintArea" style={styles.certBox}>
+                    <h3>SERTIFIKAT UJI NALAR</h3>
+                    <p style={{fontSize: '11px', color: '#666'}}>ID: {activePortfolio.certNumber}</p>
+                    <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
+                    <p><b>Nama:</b> {activePortfolio.studentName}</p>
+                    <p><b>Status:</b> {activePortfolio.status}</p>
+                    <p><b>Kerangka:</b> Ennis ({activePortfolio.ennis}) & Polya ({activePortfolio.polya})</p>
+                    <p><b>Naskah:</b> "{activePortfolio.naskahText}"</p>
+                    <p><b>Dekonstruksi:</b> "{activePortfolio.deconstructionText}"</p>
+                    <p><b>Diagnosis AI:</b> {activePortfolio.diagnosis}</p>
+                    {activePortfolio.teacherFeedback && <p><b>Catatan Guru:</b> {activePortfolio.teacherFeedback}</p>}
+                  </div>
+                ) : <p>Belum ada data tugas.</p>}
+              </div>
             )}
-          </main>
-        </>
-      )}
+          </>
+        )}
+
+        {userRole === 'guru' && (
+          <>
+            {activeTab === 'guruDashboard' && (
+              <div style={styles.card} className="no-print">
+                <h2>Evaluasi Kelas ({currentClass?.subject})</h2>
+                {submissions.length === 0 ? <p style={{color: '#666', fontSize: '13px'}}>Belum ada tugas masuk.</p> : (
+                  <table style={styles.table}>
+                    <thead><tr><th>Siswa</th><th>Status</th><th>Aksi</th></tr></thead>
+                    <tbody>
+                      {submissions.map(sub => (
+                        <tr key={sub.id}>
+                          <td>{sub.studentName}</td>
+                          <td>{sub.status}</td>
+                          <td><button style={styles.btnTable} onClick={() => setSelectedSubmission(sub)}>Periksa</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'guruSiswa' && (
+              <div style={styles.card} className="no-print">
+                <h2>Kelola Daftar Siswa</h2>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const name = e.target.sName.value.trim();
+                  if(name) {
+                    const pin = Math.floor(1000 + Math.random() * 9000).toString();
+                    setStudents([...students, { id: Date.now(), name, pin }]);
+                    e.target.sName.value = ''; alert(`Siswa ditambahkan. PIN: ${pin}`);
+                  }
+                }} style={{display: 'flex', gap: '8px', marginBottom: '15px'}}>
+                  <input name="sName" type="text" placeholder="Nama siswa..." style={{...styles.input, margin: 0, flex: 1}} required />
+                  <button type="submit" style={{...styles.btnPrimary, width: 'auto', margin: 0}}>Tambah</button>
+                </form>
+                <ul style={{paddingLeft: '15px', fontSize: '13px', color: '#444'}}>
+                  {students.map(s => <li key={s.id}>{s.name} (PIN: {s.pin})</li>)}
+                </ul>
+              </div>
+            )}
+
+            {selectedSubmission && (
+              <div style={styles.modalOverlay} className="no-print">
+                <div style={styles.modalCardLarge}>
+                  <h3>Laporan Evaluasi: {selectedSubmission.studentName}</h3>
+                  <div style={{fontSize: '13px', background: '#f9f9f9', padding: '12px', borderRadius: '4px', margin: '10px 0', maxHeight: '250px', overflowY: 'auto'}}>
+                    <p><b>Mode:</b> {selectedSubmission.mode}</p>
+                    <p><b>Waktu Submit:</b> {selectedSubmission.timestamp}</p>
+                    <p><b>Indikator:</b> Ennis ({selectedSubmission.ennis}) & Polya ({selectedSubmission.polya})</p>
+                    <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
+                    <p><b>Kutipan Naskah:</b> <br/><i>"{selectedSubmission.naskahText}"</i></p>
+                    <p><b>Uraian Dekonstruksi Siswa:</b> <br/>"{selectedSubmission.deconstructionText}"</p>
+                    <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
+                    <p><b>Hasil Diagnosis AI:</b> <br/><span style={{color: '#b91c1c'}}>{selectedSubmission.diagnosis}</span></p>
+                  </div>
+                  
+                  <label><b>Catatan / Tindak Lanjut Guru:</b></label>
+                  <textarea rows="3" placeholder="Tulis catatan revisi atau apresiasi..." value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={styles.textarea} />
+                  
+                  <div style={styles.modalActions}>
+                    <button style={styles.btnPrimary} onClick={() => handleTeacherAction(selectedSubmission.id, 'Disetujui Guru (ACC)')}>ACC / Setujui</button>
+                    <button style={styles.btnDanger} onClick={() => handleTeacherAction(selectedSubmission.id, 'Minta Revisi')}>Minta Revisi</button>
+                    <button style={styles.textBtn} onClick={() => setSelectedSubmission(null)}>Tutup</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </main>
     </div>
   );
 }
 
-// ==========================================
-// 4. SUB-COMPONENTS & LOGIKA FIREBASE
-// ==========================================
-
-function LandingPage({ setActiveTab }) {
-  return (
-    <div style={styles.card} className="no-print">
-      <h1 style={styles.title}>PENA</h1>
-      <p style={styles.subtitle}>Platform Pertanggungjawaban Nalar & Evaluasi Kritis</p>
-      <div style={styles.gridMenu}>
-        <div style={styles.menuBox} onClick={() => setActiveTab('loginSiswa')}>
-          <h3>Siswa</h3><p>Masuk menggunakan kode kelas & PIN.</p>
-        </div>
-        <div style={styles.menuBox} onClick={() => setActiveTab('loginMandiri')}>
-          <h3>Mandiri</h3><p>Simulasi latihan personal (Isolasi).</p>
-        </div>
-        <div style={styles.menuBox} onClick={() => setActiveTab('loginGuru')}>
-          <h3>Guru</h3><p>Kelola kelas & evaluasi.</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LoginSiswa({ db, setCurrentClass, setCurrentStudent, setUserRole, setActiveTab }) {
-  const [step, setStep] = useState(1);
-  const [classCode, setClassCode] = useState('');
-  const [studentName, setStudentName] = useState('');
-  const [studentPin, setStudentPin] = useState('');
-  const [resolvedClass, setResolvedClass] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Verifikasi Kode Kelas ke Firestore
-  const handleVerifyClass = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    try {
-      const q = query(collection(db, "pena_classes"), where("pin", "==", classCode.trim()));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const cls = { id: snap.docs[0].id, ...snap.docs[0].data() };
-        setResolvedClass(cls); setCurrentClass(cls); setStep(2);
-      } else { alert('❌ Kode Akses Kelas tidak ditemukan.'); }
-    } catch (err) { alert('Gagal memuat kelas. Cek koneksi.'); }
-    setIsLoading(false);
-  };
-
-  // Login Siswa dengan Toleransi Typo (Trim + Lowercase)
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    try {
-      const q = query(collection(db, "pena_students"), where("classId", "==", resolvedClass.id));
-      const snap = await getDocs(q);
-      
-      const inputNameNorm = studentName.trim().toLowerCase();
-      let foundStudent = null;
-
-      snap.forEach(doc => {
-        const data = doc.data();
-        if (data.name.trim().toLowerCase() === inputNameNorm && data.pin === studentPin.trim()) {
-          foundStudent = { id: doc.id, ...data };
-        }
-      });
-
-      if (foundStudent) {
-        setCurrentStudent(foundStudent); setUserRole('siswa'); setActiveTab('introSiswa');
-      } else { alert('❌ Nama atau PIN Siswa salah. Pastikan ejaan sesuai.'); }
-    } catch (err) { alert('Gagal masuk kelas.'); }
-    setIsLoading(false);
-  };
-
-  return (
-    <div style={styles.card} className="no-print">
-      <button style={styles.backBtn} onClick={() => setActiveTab('landing')}>← Kembali</button>
-      <h2>Akses Ruang Kelas</h2>
-      {step === 1 ? (
-        <form onSubmit={handleVerifyClass} style={styles.form}>
-          <label>Masukkan Kode Kelas dari Guru:</label>
-          <input type="password" value={classCode} onChange={e => setClassCode(e.target.value)} style={styles.input} required />
-          <button type="submit" style={styles.btnPrimary} disabled={isLoading}>{isLoading ? 'Mencari...' : 'Verifikasi Kelas'}</button>
-        </form>
-      ) : (
-        <form onSubmit={handleLogin} style={styles.form}>
-          <div style={{background: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '13px', marginBottom: '10px'}}>
-            📚 Kelas: <b>{resolvedClass.subject}</b> ({resolvedClass.teacher})
-          </div>
-          <label>Nama Lengkap (Manual):</label>
-          <input type="text" placeholder="Masukkan nama..." value={studentName} onChange={e => setStudentName(e.target.value)} style={styles.input} required />
-          <label>PIN Siswa (4 Digit):</label>
-          <input type="password" placeholder="Masukkan PIN..." value={studentPin} onChange={e => setStudentPin(e.target.value)} style={styles.input} required />
-          <div style={styles.modalActions}>
-            <button type="submit" style={styles.btnPrimary} disabled={isLoading}>{isLoading ? 'Masuk...' : 'Masuk Kelas'}</button>
-            <button type="button" style={styles.textBtn} onClick={() => setStep(1)}>Ganti Kelas</button>
-          </div>
-        </form>
-      )}
-    </div>
-  );
-}
-
-function LoginGuru({ db, setCurrentClass, setUserRole, setActiveTab }) {
-  const [isLoading, setIsLoading] = useState(false);
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    const tName = e.target.tName.value.trim();
-    const sName = e.target.sName.value.trim();
-    const pin = e.target.pin.value.trim();
-
-    try {
-      const q = query(collection(db, "pena_classes"), where("teacher", "==", tName), where("subject", "==", sName));
-      const snap = await getDocs(q);
-      
-      let targetClass;
-      if (!snap.empty) {
-        targetClass = { id: snap.docs[0].id, ...snap.docs[0].data() };
-        if (targetClass.pin !== pin) { alert('❌ Sandi (PIN) kelas salah!'); setIsLoading(false); return; }
-      } else {
-        // Buat kelas baru di Firestore
-        const docRef = await addDoc(collection(db, "pena_classes"), { teacher: tName, subject: sName, pin: pin });
-        targetClass = { id: docRef.id, teacher: tName, subject: sName, pin: pin };
-      }
-      
-      setCurrentClass(targetClass); setUserRole('guru'); setActiveTab('guruDashboard');
-    } catch (err) { alert('Gagal menghubungkan ke server.'); }
-    setIsLoading(false);
-  };
-
-  return (
-    <div style={styles.card} className="no-print">
-      <button style={styles.backBtn} onClick={() => setActiveTab('landing')}>← Kembali</button>
-      <h2>Otorisasi Guru</h2>
-      <form onSubmit={handleLogin} style={styles.form}>
-        <input name="tName" type="text" placeholder="Nama Guru (Cth: Bu Novi)" style={styles.input} required />
-        <input name="sName" type="text" placeholder="Mata Pelajaran (Cth: Fisika)" style={styles.input} required />
-        <input name="pin" type="password" placeholder="PIN Unik Kelas (Cth: 2900)" style={styles.input} required />
-        <button type="submit" style={styles.btnPrimary} disabled={isLoading}>{isLoading ? 'Memproses...' : 'Akses Ruang'}</button>
-      </form>
-    </div>
-  );
-}
-
-function LoginMandiri({ setCurrentStudent, setUserRole, setActiveTab }) {
-  return (
-    <div style={styles.card} className="no-print">
-      <button style={styles.backBtn} onClick={() => setActiveTab('landing')}>← Kembali</button>
-      <h2>Mode Mandiri</h2>
-      <form onSubmit={(e) => {
-        e.preventDefault();
-        setCurrentStudent({ id: 'mandiri-' + Date.now(), name: e.target.name.value.trim(), classId: 'mandiri' });
-        setUserRole('mandiri'); setActiveTab('introSiswa');
-      }} style={styles.form}>
-        <input name="name" type="text" placeholder="Masukkan nama..." style={styles.input} required />
-        <button type="submit" style={styles.btnPrimary}>Mulai</button>
-      </form>
-    </div>
-  );
-}
-
-function NavigationBar({ userRole, activeTab, setActiveTab, currentClass }) {
-  return (
-    <nav style={styles.navBar} className="no-print">
-      {(userRole === 'siswa' || userRole === 'mandiri') && (
-        <>
-          <span style={styles.navBadge}>{userRole === 'mandiri' ? 'Mandiri' : currentClass?.subject}</span>
-          <button style={activeTab === 'introSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('introSiswa')}>Instruksi</button>
-          <button style={activeTab === 'apiKey' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('apiKey')}>AI Key</button>
-          <button style={activeTab === 'workspace' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('workspace')}>Kanvas</button>
-          <button style={activeTab === 'portfolio' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('portfolio')}>Portofolio</button>
-        </>
-      )}
-      {userRole === 'guru' && (
-        <>
-          <span style={styles.navBadge}>{currentClass?.subject} ({currentClass?.teacher})</span>
-          <button style={activeTab === 'guruDashboard' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruDashboard')}>Evaluasi</button>
-          <button style={activeTab === 'guruSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruSiswa')}>Daftar Siswa</button>
-        </>
-      )}
-    </nav>
-  );
-}
-
-function IntroSiswa({ setActiveTab, name }) {
-  return (
-    <div style={styles.card} className="no-print">
-      <h2>Halo, {name}.</h2>
-      <p style={{color: '#555'}}>Pastikan naskah dan argumen dikerjakan secara otentik. Sistem memantau perpindahan tab dan integritas teks.</p>
-      <button style={styles.btnPrimary} onClick={() => setActiveTab('apiKey')}>Lanjut ke Setup AI →</button>
-    </div>
-  );
-}
-
-function ApiKeySetup({ apiKey, setApiKey, setActiveTab }) {
-  const [isValid, setIsValid] = useState(apiKey.length > 10);
-  const handleConnect = (e) => {
-    e.preventDefault();
-    if (apiKey.trim().length < 15) { alert('API Key terlalu pendek.'); return; }
-    setIsValid(true); setActiveTab('workspace');
-  };
-  return (
-    <div style={styles.card} className="no-print">
-      <h2>Otentikasi Kunci AI</h2>
-      <form onSubmit={handleConnect} style={styles.form}>
-        <input type="password" placeholder="Masukkan API Key Gemini AI Studio..." value={apiKey} onChange={e => setApiKey(e.target.value)} style={styles.input} required />
-        <button type="submit" style={styles.btnPrimary}>Hubungkan</button>
-      </form>
-      {isValid && <p style={{color: '#059669', fontSize: '13px', marginTop: '10px'}}>✅ Terhubung.</p>}
-    </div>
-  );
-}
-
-function KanvasWorkspace({ db, apiKey, currentStudent, currentClass, userRole, setActiveTab }) {
-  const [isPasted, setIsPasted] = useState(false);
-  const [tabSwitchCount, setTabSwitchCount] = useState(0);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [hasSubmitted, setHasSubmitted] = useState(false); // Blokir UI kalau udah pernah kumpul
-  const [formData, setFormData] = useState({ naskahText: '', ennis: 'Penjelasan Sederhana', polya: 'Memahami Masalah', deconstructionText: '' });
-
-  useEffect(() => {
-    const handleVisibility = () => { if (document.hidden) setTabSwitchCount(p => p + 1); };
-    document.addEventListener('visibilitychange', handleVisibility);
-    
-    // Cek apakah siswa udah pernah submit sebelumnya
-    const checkSubmission = async () => {
-      const q = query(collection(db, "pena_submissions"), where("studentId", "==", currentStudent.id));
-      const snap = await getDocs(q);
-      if (!snap.empty && snap.docs[0].data().status !== 'Minta Revisi') { setHasSubmitted(true); }
-    };
-    checkSubmission();
-
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [db, currentStudent.id]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!apiKey) { alert('API Key kosong! Setup di tab AI Key.'); return; }
-    setIsSubmitting(true);
-
-    let diagnosis = "";
-    if (isPasted || tabSwitchCount > 0) {
-      diagnosis = `[GAGAL INTEGRITAS] Anomali terdeteksi (Tab-switch: ${tabSwitchCount}x, Paste: ${isPasted ? 'Ya' : 'Tidak'}).`;
-    } else {
-      try {
-        const prompt = `Sebagai evaluator pendidikan kritis, evaluasi argumen siswa ini.\nNaskah asli: "${formData.naskahText}"\nArgumen Siswa: "${formData.deconstructionText}"\nFokus penilaian: ${formData.ennis} dan ${formData.polya}. Berikan respons evaluatif maksimal 40 kata apakah argumennya valid.`;
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error.message);
-        const aiResponse = data.candidates[0].content.parts[0].text;
-        diagnosis = formData.deconstructionText.split(/\s+/).length < 25 ? `[TIDAK LOLOS] Argumen terlalu dangkal. Catatan AI: ${aiResponse}` : `[LOLOS AI] ${aiResponse}`;
-      } catch (error) { diagnosis = `[ERROR AI] Gagal memproses: ${error.message}`; }
-    }
-
-    try {
-      await addDoc(collection(db, "pena_submissions"), {
-        classId: userRole === 'mandiri' ? 'mandiri' : currentClass.id,
-        studentId: currentStudent.id,
-        studentName: currentStudent.name,
-        certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}`,
-        mode: userRole === 'mandiri' ? 'Mandiri' : 'Tugas Kelas',
-        ...formData, diagnosis, tabSwitches: tabSwitchCount, hasCopyPasted: isPasted,
-        timestamp: new Date().toLocaleString(),
-        status: userRole === 'mandiri' ? 'Disetujui Otomatis' : 'Pending Review Guru',
-        teacherFeedback: ''
-      });
-      setIsPasted(false); setTabSwitchCount(0); setIsSubmitting(false); setActiveTab('portfolio');
-    } catch (e) { alert('Gagal mengirim tugas.'); setIsSubmitting(false); }
-  };
-
-  if (hasSubmitted) return <div style={styles.card}><h3>Tugas Telah Dikirim</h3><p>Periksa tab Portofolio.</p></div>;
-
-  return (
-    <div style={styles.card} className="no-print">
-      <h2>Kanvas Nalar</h2>
-      <div style={styles.monitor}>
-        <span>Pindah Tab: <b>{tabSwitchCount}x</b></span>
-        <span>Copy-Paste: <b>{isPasted ? 'Terdeteksi' : 'Aman'}</b></span>
-      </div>
-      <form onSubmit={handleSubmit} style={styles.form}>
-        <label>1. Kutipan Naskah:</label>
-        <textarea rows="3" value={formData.naskahText} onChange={e => setFormData({...formData, naskahText: e.target.value})} style={styles.textarea} required />
-        <div style={{display: 'flex', gap: '10px'}}>
-          <div style={{flex: 1}}>
-            <label>2. Kerangka Ennis:</label>
-            <select value={formData.ennis} onChange={e => setFormData({...formData, ennis: e.target.value})} style={styles.input}>
-              <option>Penjelasan Sederhana</option><option>Keterampilan Dasar</option><option>Menyimpulkan</option>
-            </select>
-          </div>
-          <div style={{flex: 1}}>
-            <label>3. Tahap Polya:</label>
-            <select value={formData.polya} onChange={e => setFormData({...formData, polya: e.target.value})} style={styles.input}>
-              <option>Memahami Masalah</option><option>Merencanakan Penyelesaian</option><option>Memeriksa Kembali</option>
-            </select>
-          </div>
-        </div>
-        <label>4. Uraian Kritis:</label>
-        <textarea rows="5" value={formData.deconstructionText} onChange={e => setFormData({...formData, deconstructionText: e.target.value})} onPaste={() => setIsPasted(true)} style={styles.textarea} required />
-        <button type="submit" style={styles.btnPrimary} disabled={isSubmitting}>{isSubmitting ? 'Memproses AI & Cloud...' : 'Kirim Tugas'}</button>
-      </form>
-    </div>
-  );
-}
-
-function Portofolio({ db, currentStudent, currentClass }) {
-  const [portfolio, setPortfolio] = useState(null);
-
-  // Firestore Realtime Listener untuk update status dari guru
-  useEffect(() => {
-    if (!currentStudent?.id) return;
-    const q = query(collection(db, "pena_submissions"), where("studentId", "==", currentStudent.id));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        // Ambil data terbaru (asumsi 1 siswa 1 tugas aktif)
-        const docs = snap.docs.map(doc => doc.data());
-        // Sortir descending berdasarkan timestamp (simulasi simpel)
-        setPortfolio(docs[docs.length - 1]);
-      }
-    });
-    return () => unsubscribe();
-  }, [db, currentStudent?.id]);
-
-  if (!portfolio) return <div><p>Belum ada tugas atau sedang memuat data awan...</p></div>;
-
-  return (
-    <div>
-      <div className="no-print" style={{marginBottom:'10px'}}><button style={styles.btnSecondary} onClick={() => window.print()}>Cetak PDF</button></div>
-      <div id="certPrintArea" style={styles.certBox}>
-        <h3>SERTIFIKAT UJI NALAR</h3>
-        <p style={{fontSize: '11px', color: '#666'}}>ID: {portfolio.certNumber}</p>
-        <hr style={{borderTop: '1px solid #ddd'}}/>
-        <p><b>Nama:</b> {portfolio.studentName} | <b>Status:</b> {portfolio.status}</p>
-        <p><b>Naskah:</b> "{portfolio.naskahText}"</p>
-        <p><b>Dekonstruksi:</b> "{portfolio.deconstructionText}"</p>
-        <p><b>Diagnosis AI:</b> {portfolio.diagnosis}</p>
-        {portfolio.teacherFeedback && <p><b>Catatan Guru:</b> {portfolio.teacherFeedback}</p>}
-      </div>
-    </div>
-  );
-}
-
-function GuruDashboard({ db, currentClass }) {
-  const [submissions, setSubmissions] = useState([]);
-  const [selected, setSelected] = useState(null);
-  const [note, setNote] = useState('');
-
-  // Firestore Realtime Listener
-  useEffect(() => {
-    if (!currentClass?.id) return;
-    const q = query(collection(db, "pena_submissions"), where("classId", "==", currentClass.id));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setSubmissions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
-  }, [db, currentClass?.id]);
-
-  const handleAction = async (id, status) => {
-    const docRef = doc(db, "pena_submissions", id);
-    await updateDoc(docRef, { status, teacherFeedback: note });
-    setSelected(null); setNote('');
-  };
-
-  return (
-    <div style={styles.card} className="no-print">
-      <h2>Evaluasi Kelas ({currentClass?.subject})</h2>
-      {submissions.length === 0 ? <p>Belum ada tugas masuk.</p> : (
-        <table style={styles.table}>
-          <thead><tr><th>Siswa</th><th>Status</th><th>Aksi</th></tr></thead>
-          <tbody>
-            {submissions.map(sub => (
-              <tr key={sub.id}>
-                <td>{sub.studentName}</td><td>{sub.status}</td>
-                <td><button style={styles.btnTable} onClick={() => setSelected(sub)}>Periksa</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {selected && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalCardLarge}>
-            <h3>Laporan: {selected.studentName}</h3>
-            <div style={{fontSize: '13px', background: '#f9f9f9', padding: '10px'}}>
-              <p><b>Siswa:</b> {selected.studentName} (Tab Pindah: {selected.tabSwitches}x)</p>
-              <p><b>Dekonstruksi:</b> "{selected.deconstructionText}"</p>
-              <p><b>Diagnosis AI:</b> <span style={{color: '#b91c1c'}}>{selected.diagnosis}</span></p>
-            </div>
-            <textarea rows="2" placeholder="Catatan guru..." value={note} onChange={e => setNote(e.target.value)} style={{...styles.textarea, marginTop:'10px'}} />
-            <div style={styles.modalActions}>
-              <button style={styles.btnPrimary} onClick={() => handleAction(selected.id, 'Disetujui Guru (ACC)')}>ACC</button>
-              <button style={styles.btnDanger} onClick={() => handleAction(selected.id, 'Minta Revisi')}>Revisi</button>
-              <button style={styles.textBtn} onClick={() => setSelected(null)}>Tutup</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function GuruSiswa({ db, currentClass }) {
-  const [students, setStudents] = useState([]);
-
-  // Firestore Realtime Listener
-  useEffect(() => {
-    if (!currentClass?.id) return;
-    const q = query(collection(db, "pena_students"), where("classId", "==", currentClass.id));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setStudents(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
-  }, [db, currentClass?.id]);
-
-  const handleAdd = async (e) => {
-    e.preventDefault();
-    const name = e.target.sName.value.trim();
-    if(name) {
-      const pin = Math.floor(1000 + Math.random() * 9000).toString();
-      await addDoc(collection(db, "pena_students"), { classId: currentClass.id, name, pin });
-      e.target.sName.value = '';
-    }
-  };
-
-  return (
-    <div style={styles.card} className="no-print">
-      <h2>Kelola Siswa</h2>
-      <p style={{fontSize: '12px', color: '#666'}}>Berikan PIN ini ke siswa secara privat.</p>
-      <form onSubmit={handleAdd} style={{display: 'flex', gap: '8px', marginBottom: '15px'}}>
-        <input name="sName" type="text" placeholder="Nama Lengkap..." style={{...styles.input, margin: 0, flex: 1}} required />
-        <button type="submit" style={{...styles.btnPrimary, width: 'auto', margin: 0}}>Tambah</button>
-      </form>
-      <ul style={{fontSize: '13px'}}>
-        {students.map(s => <li key={s.id}><b>{s.name}</b> - PIN: <span style={{color: '#dc2626', fontWeight: 'bold'}}>{s.pin}</span></li>)}
-      </ul>
-    </div>
-  );
-}
-
-// ==========================================
-// 5. STYLE CONFIGURATION
-// ==========================================
 const styles = {
   appContainer: { fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', maxWidth: '750px', margin: '30px auto', padding: '15px', color: '#111' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e5e5', paddingBottom: '12px', marginBottom: '20px' },
@@ -588,9 +614,11 @@ const styles = {
   navBtn: { background: '#f5f5f5', border: '1px solid #ddd', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', cursor: 'pointer' },
   navActive: { background: '#111', color: '#fff', border: '1px solid #111', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center' },
+  modalCard: { background: '#fff', padding: '25px', borderRadius: '8px', width: '320px', border: '1px solid #ddd' },
   modalCardLarge: { background: '#fff', padding: '25px', borderRadius: '8px', width: '480px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid #ddd' },
   modalActions: { display: 'flex', gap: '10px', marginTop: '15px', alignItems: 'center' },
   monitor: { background: '#f9f9f9', border: '1px solid #eee', padding: '8px', fontSize: '12px', display: 'flex', justifyContent: 'space-between', marginBottom: '10px', borderRadius: '4px' },
+  promptBox: { background: '#f4f4f5', borderLeft: '3px solid #111', padding: '10px', fontSize: '12px', margin: '10px 0', borderRadius: '0 4px 4px 0' },
   certBox: { border: '1px solid #ccc', padding: '20px', background: '#fff', borderRadius: '4px' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginTop: '10px' },
   main: { marginTop: '10px' }
