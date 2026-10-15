@@ -10,7 +10,7 @@ export default function App() {
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
   const [isValidatingApi, setIsValidatingApi] = useState(false);
 
-  // Database Global Kelas (Langsung Sync dengan LocalStorage)
+  // Database Global Kelas
   const [allClasses, setAllClasses] = useState(() => {
     try {
       const saved = localStorage.getItem('PENA_ALL_CLASSES');
@@ -95,7 +95,6 @@ export default function App() {
   // --- 4. HANDLER LOGIN & LOGOUT ---
   const [classCodeInput, setClassCodeInput] = useState('');
   const [loginStudentName, setLoginStudentName] = useState('');
-  const [loginStudentPin, setLoginStudentPin] = useState('');
   const [resolvedStudentList, setResolvedStudentList] = useState([]);
   const [quickStudentName, setQuickStudentName] = useState('');
 
@@ -113,20 +112,21 @@ export default function App() {
       const parsedStu = savedStu ? JSON.parse(savedStu) : [];
       setResolvedStudentList(parsedStu);
     } else {
-      alert(`❌ Kode Akses "${cleanCode}" tidak ditemukan!\n\nPastikan Guru sudah membuat kelas dengan PIN tersebut.`);
+      alert(`❌ Kode Kelas "${cleanCode}" tidak ditemukan!\n\nPastikan Guru sudah membuat kelas dengan Kode tersebut.`);
       setCurrentClass(null);
     }
   };
 
   const handleStudentLoginFinal = (e) => {
     e.preventDefault();
-    const student = resolvedStudentList.find(s => s.name === loginStudentName && s.pin === loginStudentPin);
+    // PERBAIKAN: Siswa cukup pilih nama yang sudah didaftarkan guru, tanpa PIN tambahan.
+    const student = resolvedStudentList.find(s => s.name === loginStudentName);
     if (student) {
       setCurrentStudent(student);
       setUserRole('siswa');
       setActiveTab('introSiswa');
     } else {
-      alert('❌ Nama atau PIN Siswa salah!');
+      alert('❌ Harap pilih nama Anda dari daftar!');
     }
   };
 
@@ -134,8 +134,7 @@ export default function App() {
     e.preventDefault();
     if (!quickStudentName.trim()) return;
     const name = quickStudentName.trim();
-    const autoPin = '1234'; // PIN default siswa baru
-    const newStudent = { id: Date.now(), name, pin: autoPin };
+    const newStudent = { id: Date.now(), name };
     
     const updatedList = [...resolvedStudentList, newStudent];
     setResolvedStudentList(updatedList);
@@ -146,7 +145,7 @@ export default function App() {
     setCurrentStudent(newStudent);
     setUserRole('siswa');
     setActiveTab('introSiswa');
-    alert(`✅ Berhasil masuk sebagai ${name}! PIN Siswa kamu adalah: ${autoPin}`);
+    alert(`✅ Berhasil masuk sebagai ${name}!`);
   };
 
   const handleRegisterOrLoginGuru = (e) => {
@@ -161,11 +160,11 @@ export default function App() {
     let targetClass = latestClasses.find(c => c.teacher.toLowerCase() === tName.toLowerCase() && c.subject.toLowerCase() === sName.toLowerCase());
     
     if (targetClass) {
-      if (targetClass.pin !== pin) return alert('❌ Sandi (PIN) guru salah untuk kelas ini!');
+      if (targetClass.pin !== pin) return alert('❌ Sandi/Kode guru salah untuk kelas ini!');
     } else {
       const isPinTaken = latestClasses.find(c => c.pin === pin);
       if (isPinTaken) {
-        return alert(`❌ PIN "${pin}" sudah dipakai kelas lain. Gunakan PIN yang berbeda!`);
+        return alert(`❌ Kode "${pin}" sudah dipakai kelas lain. Gunakan Kode/Sandi yang berbeda!`);
       }
       targetClass = { teacher: tName, subject: sName, pin: pin, id: Date.now() };
       const updatedClasses = [...latestClasses, targetClass];
@@ -177,7 +176,7 @@ export default function App() {
     setUserRole('guru');
     setShowPinModal(false);
     setActiveTab('guruDashboard');
-    alert(`✅ Kelas ${sName} berhasil diaktifkan dengan Kode Akses: ${pin}`);
+    alert(`✅ Kelas berhasil dibuka! Berikan KODE KELAS ini ke siswa Anda: ${pin}`);
   };
 
   const handleMandiriLogin = (e) => {
@@ -222,27 +221,17 @@ export default function App() {
   const activePortfolio = submissions.find(s => s.id === activeSubmissionId);
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Minta Revisi';
 
-  // --- FUNGSI FETCH KE API GOOGLE (SUDAH DIPERBAIKI) ---
+  // --- FUNGSI FETCH KE API GOOGLE (HANYA GEMINI 1.5 FLASH) ---
   const callGeminiAPI = async (key, promptText) => {
-    // Coba endpoint terbaru gemini-1.5-flash-latest
-    let url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${key}`;
-    let res = await fetch(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    // PERBAIKAN: Kunci model mutlak ke gemini-1.5-flash (model terbaru yang valid).
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+    const res = await fetch(url, {
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
     });
     
-    let data = await res.json();
-
-    // Jika gagal karena model tidak ditemukan, coba fallback ke gemini-pro (model versi sebelumnya)
-    if (!res.ok && data.error?.message?.includes("not found")) {
-        console.warn("Model 1.5-flash gagal, mencoba fallback ke gemini-pro...");
-        url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${key}`;
-        res = await fetch(url, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
-        });
-        data = await res.json();
-    }
+    const data = await res.json();
 
     if (!res.ok) {
         throw new Error(data.error?.message || "Koneksi ditolak Google.");
@@ -251,24 +240,15 @@ export default function App() {
     return data;
   };
 
-
   const checkApiValidity = async (e) => {
     e.preventDefault();
     const cleanKey = apiKey.trim();
-    
-    if (cleanKey === 'BYPASS_API_2026') {
-      setIsApiValid(true);
-      setApiKey(cleanKey);
-      setActiveTab('workspace');
-      alert('✅ Mode Testing Bypass Aktif!');
-      return;
-    }
-
     if (cleanKey.length < 15) return alert('❌ API Key tidak valid.');
     
     setIsValidatingApi(true);
     try {
-      await callGeminiAPI(cleanKey, "Balas OK");
+      // Test Ping AI
+      await callGeminiAPI(cleanKey, "Balas dengan kata: KONEKSI SUKSES");
       
       setIsApiValid(true);
       setApiKey(cleanKey);
@@ -290,26 +270,28 @@ export default function App() {
     const hasViolations = isPasted || tabSwitchCount > 0;
 
     if (hasViolations) {
-      diagnosis = `⚠️ ANOMALI TERDETEKSI: Pindah tab ${tabSwitchCount}x, Copy-paste: ${isPasted ? 'Ya' : 'Tidak'}. Argumen kehilangan validitas analitis karena indikasi manipulasi atau bantuan luar.`;
+      diagnosis = `⚠️ ANOMALI TERDETEKSI: Pindah tab ${tabSwitchCount}x, Copy-paste: ${isPasted ? 'Ya' : 'Tidak'}. Argumen kehilangan validitas analitis karena indikasi manipulasi (menyontek).`;
     } else {
-      if (apiKey === 'BYPASS_API_2026') {
-        diagnosis = "🤖 [BYPASS MODE] Analisis dianggap valid tanpa pemeriksaan API Google.";
-      } else {
-        try {
-          const prompt = `
-            Tugas Evaluasi Kritis Pendidikan:
-            Siswa sedang mendekonstruksi logika sebuah naskah.
-            - Kutipan Naskah: "${formData.naskahText}"
-            - Pemikiran Siswa (Fokus ${formData.ennisIndicator} & Tahap ${formData.polyaStep}): "${formData.deconstructionText}"
-            
-            Evaluasi secara kritis. Jika ngawur/asal ketik, katakan salah secara tegas. Jika logis, puji analisisnya. Jawab maksimal 3 kalimat padat.
-          `;
+      try {
+        // PERBAIKAN: Prompt yang sangat ketat agar AI mendeteksi jawaban asal-asalan.
+        const prompt = `
+          Tugas Evaluasi Kritis Pendidikan:
+          Seorang siswa diminta menganalisis secara logis sebuah naskah.
+          
+          Naskah yang dianalisis: "${formData.naskahText}"
+          Jawaban Siswa (Fokus ${formData.ennisIndicator} & Tahap ${formData.polyaStep}): "${formData.deconstructionText}"
+          
+          INSTRUKSI UNTUK AI:
+          Jadilah dosen penguji yang sangat kritis. 
+          1. Jika jawaban siswa asal-asalan, ngawur, terlalu pendek, atau tidak nyambung dengan Naskah sama sekali, NYATAKAN SALAH dan berikan kritikan pedas.
+          2. Jika jawaban siswa logis dan benar-benar membedah naskah sesuai fokusnya, berikan pujian analitis.
+          Jawab dengan maksimal 3 kalimat tegas.
+        `;
 
-          const data = await callGeminiAPI(apiKey, prompt);
-          diagnosis = "🤖 Evaluasi AI (Gemini): " + data.candidates[0].content.parts[0].text;
-        } catch (err) {
-          diagnosis = `⚠️ Sistem AI Gagal memproses: ${err.message}. Teks tersimpan secara lokal tanpa evaluasi AI.`;
-        }
+        const data = await callGeminiAPI(apiKey, prompt);
+        diagnosis = "🤖 Evaluasi AI (Gemini): " + data.candidates[0].content.parts[0].text;
+      } catch (err) {
+        diagnosis = `⚠️ Sistem AI Gagal memproses: ${err.message}. Teks tersimpan secara lokal tanpa evaluasi AI.`;
       }
     }
 
@@ -377,7 +359,7 @@ export default function App() {
         {userRole && <button style={styles.textBtn} onClick={handleLogout}>🚪 Keluar</button>}
       </header>
 
-      {/* ================= LANDING PAGE (PETUNJUK KOMPREHENSIF) ================= */}
+      {/* ================= LANDING PAGE ================= */}
       {!userRole && activeTab === 'landing' && (
         <div style={styles.card} className="no-print">
           <div style={{textAlign: 'center', marginBottom: '25px'}}>
@@ -388,12 +370,12 @@ export default function App() {
           <div style={styles.rulesBox}>
             <h3 style={{margin: '0 0 10px 0', color: '#1e3a8a'}}>📖 Apa itu PENA dan Bagaimana Aturan Mainnya?</h3>
             <p style={{margin: '0 0 8px 0', fontSize: '13px', lineHeight: '1.6'}}>
-              PENA diciptakan untuk melawan kebiasaan <i>Copy-Paste</i> dari AI. Di sini, mesin AI justru bertindak sebagai <b>Dosen Penguji</b> yang kejam. Anda harus membuktikan bahwa tulisan yang Anda buat murni hasil nalar kritis Anda sendiri, bukan buatan robot. Sistem juga mengawasi gerak-gerik Anda selama mengerjakan tugas.
+              PENA diciptakan untuk melawan kebiasaan <i>Copy-Paste</i> dari AI. Di sini, mesin AI justru bertindak sebagai <b>Dosen Penguji</b> yang kritis. Anda harus membuktikan bahwa tulisan yang Anda buat murni hasil nalar kritis sendiri.
             </p>
             <ul style={{fontSize: '13px', paddingLeft: '20px', margin: 0, color: '#475569', lineHeight: '1.6'}}>
               <li><b>Tugas Anda:</b> Mendekonstruksi (membongkar logika) sebuah naskah/argumen.</li>
-              <li><b>Integritas:</b> DILARANG keras berpindah Tab <i>(Switching)</i> atau melakukan <i>Copy-Paste</i> di area ujian (Kanvas). Jika terdeteksi, AI tidak akan mau menilai karya Anda.</li>
-              <li><b>Mesin AI:</b> Menggunakan Google Gemini. Jawaban ngawur atau tidak nyambung dengan konteks akan langsung ditolak/dibantai oleh AI.</li>
+              <li><b>Integritas:</b> DILARANG keras berpindah Tab <i>(Switching)</i> atau melakukan <i>Copy-Paste</i> di area ujian (Kanvas). Jika terdeteksi, AI akan mencatat pelanggaran Anda.</li>
+              <li><b>Mesin AI:</b> Jawaban ngawur atau tidak nyambung dengan konteks akan langsung ditolak oleh AI Gemini.</li>
             </ul>
           </div>
           
@@ -404,11 +386,11 @@ export default function App() {
             </div>
             <div style={styles.menuBox} onClick={() => setShowPinModal(true)}>
               <h3 style={{color: '#16a34a', margin: '0 0 10px 0'}}>👨‍🏫 Ruang Guru</h3>
-              <p style={{fontSize: '12px', color: '#64748b'}}>Area admin. Buat kelas, kelola absensi, dan validasi tugas (ACC/Revisi).</p>
+              <p style={{fontSize: '12px', color: '#64748b'}}>Area admin. Buat kelas, kelola absensi, dan validasi tugas.</p>
             </div>
             <div style={styles.menuBox} onClick={() => setShowMandiriModal(true)}>
-              <h3 style={{color: '#9333ea', margin: '0 0 10px 0'}}>👤 Mode Latihan Mandiri</h3>
-              <p style={{fontSize: '12px', color: '#64748b'}}>Uji coba personal. Data tidak disimpan dan akan musnah saat Anda keluar.</p>
+              <h3 style={{color: '#9333ea', margin: '0 0 10px 0'}}>👤 Latihan Mandiri</h3>
+              <p style={{fontSize: '12px', color: '#64748b'}}>Uji coba personal. Data akan musnah saat Anda keluar.</p>
             </div>
           </div>
         </div>
@@ -423,8 +405,8 @@ export default function App() {
           {!currentClass ? (
             <form onSubmit={handleVerifyClassCode} style={styles.form}>
               <div style={styles.infoBox}><b>Langkah 1:</b> Masukkan Kode Akses yang diberikan oleh Guru Anda.</div>
-              <label style={styles.label}>Kode Akses Kelas:</label>
-              <input type="password" placeholder="Misal: 12345" value={classCodeInput} onChange={(e) => setClassCodeInput(e.target.value)} style={styles.input} required />
+              <label style={styles.label}>Kode Kelas:</label>
+              <input type="password" placeholder="Minta ke guru, misal: SOS123" value={classCodeInput} onChange={(e) => setClassCodeInput(e.target.value)} style={styles.input} required />
               <button type="submit" style={styles.btnPrimary}>Cari & Verifikasi Kelas 🔍</button>
             </form>
           ) : (
@@ -435,14 +417,12 @@ export default function App() {
 
               {resolvedStudentList.length > 0 ? (
                 <form onSubmit={handleStudentLoginFinal} style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
-                  <div style={styles.infoBox}><b>Langkah 2:</b> Pilih nama Anda dari daftar absensi dan masukkan PIN rahasia Anda.</div>
+                  <div style={styles.infoBox}><b>Langkah 2:</b> Pilih nama Anda dari daftar absensi.</div>
                   <label style={styles.label}>Pilih Nama Anda di Absensi:</label>
                   <select value={loginStudentName} onChange={(e) => setLoginStudentName(e.target.value)} style={styles.input} required>
-                    <option value="" disabled>-- Pilih Nama --</option>
+                    <option value="" disabled>-- Klik Untuk Memilih Nama Anda --</option>
                     {resolvedStudentList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                   </select>
-                  <label style={styles.label}>PIN Siswa (4 Digit Rahasia):</label>
-                  <input type="password" placeholder="Tanya Guru jika Anda belum tahu PIN Anda" value={loginStudentPin} onChange={(e) => setLoginStudentPin(e.target.value)} style={styles.input} required />
                   <div style={styles.modalActions}>
                     <button type="submit" style={styles.btnPrimary}>Masuk Kelas 🚀</button>
                     <button type="button" style={styles.btnDanger} onClick={() => { setCurrentClass(null); setClassCodeInput(''); setLoginStudentName(''); }}>Ganti Kode Kelas</button>
@@ -470,14 +450,14 @@ export default function App() {
           <div style={styles.modalCard}>
             <h3>Otorisasi Akses Guru</h3>
             <div style={styles.infoBox}>
-              <b>Petunjuk:</b> Masukkan identitas kelas. Jika kelas belum ada, sistem otomatis membuatkannya. Pastikan <b>PIN Kelas harus UNIK</b> agar tidak bentrok dengan guru lain.
+              <b>Petunjuk:</b> Masukkan identitas kelas. Jika kelas belum ada, sistem otomatis membuatkannya. Pastikan <b>KODE KELAS harus UNIK</b> (berisi kombinasi huruf/angka) agar kelas Anda tidak bercampur dengan guru lain.
             </div>
             <form onSubmit={handleRegisterOrLoginGuru} style={styles.form}>
               <label style={styles.label}>Nama Guru:</label>
               <input type="text" placeholder="Contoh: Pak Budi" value={teacherNameInput} onChange={(e) => setTeacherNameInput(e.target.value)} style={styles.input} required />
               <label style={styles.label}>Mata Pelajaran (Nama Kelas):</label>
               <input type="text" placeholder="Contoh: Sosiologi 12 IPA 1" value={subjectInput} onChange={(e) => setSubjectInput(e.target.value)} style={styles.input} required />
-              <label style={styles.label}>Sandi / PIN Kelas (Berikan ini ke Siswa nanti):</label>
+              <label style={styles.label}>Kode / Sandi Kelas (Berikan ini ke Siswa nanti):</label>
               <input type="password" placeholder="Contoh: SOS24A" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} required />
               <div style={styles.modalActions}>
                 <button type="submit" style={styles.btnPrimary}>Akses / Buat Ruang</button>
@@ -494,7 +474,7 @@ export default function App() {
           <div style={styles.modalCard}>
             <h3>Mode Latihan Mandiri</h3>
             <div style={styles.infoBox}>
-              <b>Peringatan:</b> Mode ini ditujukan hanya untuk latihan mengecek logika dengan AI. Begitu Anda klik "Keluar", <b>semua data ujian Anda di mode ini akan hangus dan tidak tersimpan.</b>
+              <b>Peringatan:</b> Mode ini ditujukan hanya untuk latihan mengecek logika dengan AI. Begitu Anda klik "Keluar", <b>semua data Anda di mode ini akan hangus dan tidak tersimpan.</b>
             </div>
             <form onSubmit={handleMandiriLogin} style={styles.form}>
               <label style={styles.label}>Nama Simulasi (Bebas):</label>
@@ -542,9 +522,9 @@ export default function App() {
                   <p style={{fontSize: '13px', margin: '0 0 10px 0'}}>Harap ikuti tahapan ini secara berurutan. Jangan melompat ke tab lain sebelum tugas di tab saat ini selesai.</p>
                   <ol style={{lineHeight: '1.8', margin: 0, paddingLeft: '20px', fontSize: '13px'}}>
                     <li><b>Siapkan Argumen (Tab 1):</b> Pastikan Anda sudah memiliki materi/naskah opini yang akan Anda kritik atau pertahankan logikanya.</li>
-                    <li><b>Hubungkan Penguji AI (Tab 2):</b> Pergi ke tab "Koneksi AI Key". Anda wajib memasukkan kunci API dari Google Gemini. Mesin AI ini yang akan bertugas menilai tugas Anda.</li>
-                    <li><b>Kerjakan di Kanvas (Tab 3):</b> Dekonstruksi naskah Anda di sini. Jawab pertanyaan pemantik dengan nalar kritis. <b>PERINGATAN: Sistem MEREKAM AKTIVITAS Anda!</b> Jika Anda terdeteksi <i>copy-paste</i> atau membuka tab/browser lain untuk mencontek, integritas ujian Anda dianggap rusak.</li>
-                    <li><b>Selesai & Unduh Bukti (Tab 4):</b> Setelah dikirim, Anda bisa mengunduh sertifikat evaluasi dalam bentuk PDF, dan menunggu Guru untuk memberikan ACC/Revisi.</li>
+                    <li><b>Hubungkan Penguji AI (Tab 2):</b> Pergi ke tab "Koneksi AI Key". Anda wajib memasukkan kunci API dari Google Gemini. Mesin AI ini yang akan bertugas menilai tugas Anda secara ketat.</li>
+                    <li><b>Kerjakan di Kanvas (Tab 3):</b> Dekonstruksi naskah Anda di sini. Jawab pertanyaan pemantik dengan nalar kritis Anda sendiri. <b>AWAS:</b> Pindah tab atau copy-paste akan langsung merusak nilai integritas Anda.</li>
+                    <li><b>Selesai & Unduh Bukti (Tab 4):</b> Setelah dikirim, Anda bisa mengunduh laporan PDF dan menunggu Guru memberikan ACC.</li>
                   </ol>
                 </div>
                 <button style={{...styles.btnPrimary, marginTop: '15px'}} onClick={() => setActiveTab('apiKey')}>Saya Mengerti, Lanjut Hubungkan AI →</button>
@@ -557,8 +537,8 @@ export default function App() {
                 <div style={styles.infoBox}>
                   <b>Petunjuk Mendapatkan AI Key Gratis:</b>
                   <ul style={{margin: '5px 0 0 0', paddingLeft: '20px'}}>
-                    <li>Buka browser baru dan kunjungi: <b>aistudio.google.com/app/apikey</b></li>
-                    <li>Login dengan akun Google Anda.</li>
+                    <li>Buka tab browser baru dan kunjungi: <b>aistudio.google.com/app/apikey</b></li>
+                    <li>Login menggunakan akun Google Anda.</li>
                     <li>Klik tombol <b>"Create API Key"</b>.</li>
                     <li>Salin kode panjang yang muncul (berawalan AIza...), lalu tempelkan di kotak bawah ini.</li>
                   </ul>
@@ -567,7 +547,7 @@ export default function App() {
                 <form onSubmit={checkApiValidity} style={styles.form}>
                   <input type="password" placeholder="Paste kode API Key milikmu di sini..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} required />
                   <button type="submit" style={{...styles.btnPrimary, background: '#2563eb'}} disabled={isValidatingApi}>
-                    {isValidatingApi ? 'Mengecek Server Google...' : 'Validasi & Hubungkan Penguji 🔑'}
+                    {isValidatingApi ? 'Menghubungkan ke Server Google...' : 'Validasi & Hubungkan Penguji 🔑'}
                   </button>
                 </form>
                 {isApiValid && <div style={styles.successBadge}>✅ Kunci AI terverifikasi. Mesin AI siap menguji Anda. Silakan lanjut ke tab "3. Ujian Kanvas".</div>}
@@ -586,7 +566,7 @@ export default function App() {
                     <h2 style={{marginTop: 0, marginBottom: '5px'}}>Kanvas Dekonstruksi Nalar</h2>
                     <p style={{fontSize: '13px', color: '#64748b', marginBottom: '15px'}}>Jawablah dengan argumentasi Anda sendiri. Hindari berpindah tab selama mengerjakan area ini.</p>
                     
-                    {!isApiValid && <div style={{background: '#fef2f2', color: '#991b1b', padding: '10px', borderRadius: '6px', fontSize: '13px', marginBottom: '15px', borderLeft: '4px solid #ef4444'}}><b>⚠️ Henti Dulu!</b> Anda harus mengaktifkan AI Key di tab sebelumnya agar mesin bisa menilai tugas ini.</div>}
+                    {!isApiValid && <div style={{background: '#fef2f2', color: '#991b1b', padding: '10px', borderRadius: '6px', fontSize: '13px', marginBottom: '15px', borderLeft: '4px solid #ef4444'}}><b>⚠️ Berhenti Dulu!</b> Anda WAJIB mengaktifkan AI Key di tab sebelumnya (Tab 2) agar mesin bisa menilai ujian Anda.</div>}
                     
                     <div style={styles.monitor}>
                       <span>👀 Pelanggaran Pindah Tab: <b style={{color: tabSwitchCount > 0 ? '#dc2626' : '#16a34a'}}>{tabSwitchCount} Kali</b></span>
@@ -606,25 +586,25 @@ export default function App() {
                           <select value={formData.ennisIndicator} onChange={(e) => setFormData({...formData, ennisIndicator: e.target.value})} style={styles.input}>
                             {Object.keys(ennisPrompts).map(k => <option key={k}>{k}</option>)}
                           </select>
-                          <div style={styles.promptBox}><b>💡 Pemantik:</b> {ennisPrompts[formData.ennisIndicator]}</div>
+                          <div style={styles.promptBox}><b>💡 Pertanyaan Pemantik:</b> {ennisPrompts[formData.ennisIndicator]}</div>
                         </div>
                         <div style={styles.frameworkBox}>
                           <label style={styles.label}>Strategi Pemecahan (Tahap Polya):</label>
                           <select value={formData.polyaStep} onChange={(e) => setFormData({...formData, polyaStep: e.target.value})} style={styles.input}>
                             {Object.keys(polyaPrompts).map(k => <option key={k}>{k}</option>)}
                           </select>
-                          <div style={styles.promptBox}><b>💡 Pemantik:</b> {polyaPrompts[formData.polyaStep]}</div>
+                          <div style={styles.promptBox}><b>💡 Pertanyaan Pemantik:</b> {polyaPrompts[formData.polyaStep]}</div>
                         </div>
                       </div>
 
                       <div style={styles.formGroup}>
                         <label style={styles.label}>2. Penjabaran Analisis Kritis Anda (Dekonstruksi):</label>
-                        <p style={{fontSize: '11px', color: '#64748b', margin: '2px 0 5px 0'}}>Susun argumen Anda dengan menjawab <b>Pemantik</b> yang ada di kotak kuning di atas berdasarkan Naskah Anda.</p>
+                        <p style={{fontSize: '11px', color: '#64748b', margin: '2px 0 5px 0'}}>Susun argumen Anda dengan menjawab <b>Pertanyaan Pemantik</b> di kotak kuning di atas berdasarkan Naskah Anda. Menjawab ngawur/asal akan ditolak AI.</p>
                         <textarea rows="6" placeholder="Ketik argumen kritis logis Anda secara mandiri di sini..." value={formData.deconstructionText} onChange={(e) => setFormData({...formData, deconstructionText: e.target.value})} onPaste={() => setIsPasted(true)} style={styles.textarea} required />
                       </div>
 
                       <button type="submit" style={{...styles.btnPrimary, padding: '15px'}} disabled={!isApiValid || isSubmittingTask}>
-                        {isSubmittingTask ? '🤖 AI Sedang Menguji Logika Anda...' : 'Kirim Uji Nalar ke Server AI 🚀'}
+                        {isSubmittingTask ? '🤖 AI Sedang Menguji Kelogisan Anda...' : 'Kirim Uji Nalar ke Server AI 🚀'}
                       </button>
                     </form>
                   </>
@@ -635,32 +615,32 @@ export default function App() {
             {activeTab === 'portfolio' && (
               <div>
                 <div style={{marginBottom: '15px'}} className="no-print">
-                  <button style={{...styles.btnPrimary, width: 'auto'}} onClick={() => window.print()}>📄 Cetak / Unduh PDF Sebagai Bukti Fisik</button>
+                  <button style={{...styles.btnPrimary, width: 'auto'}} onClick={() => window.print()}>📄 Cetak / Unduh Laporan (PDF)</button>
                 </div>
                 {activePortfolio ? (
                   <div id="printArea" style={styles.certBox}>
-                    <h2 style={{textAlign: 'center', color: '#1e3a8a', margin: '0 0 5px 0', fontWeight: '900'}}>SERTIFIKAT & LAPORAN UJI NALAR</h2>
-                    <p style={{textAlign: 'center', fontSize: '11px', color: '#64748b', margin: '0 0 20px 0'}}>REGISTRASI PENA: {activePortfolio.certNumber}</p>
+                    <h2 style={{textAlign: 'center', color: '#1e3a8a', margin: '0 0 5px 0', fontWeight: '900'}}>LAPORAN UJI NALAR AKADEMIK</h2>
+                    <p style={{textAlign: 'center', fontSize: '11px', color: '#64748b', margin: '0 0 20px 0'}}>REGISTRASI SISTEM: {activePortfolio.certNumber}</p>
                     
                     <div style={{fontSize: '13px', lineHeight: '1.6'}}>
                       <table style={{width: '100%', marginBottom: '15px', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px'}}>
                         <tbody>
                           <tr><td style={{width: '120px', color: '#475569'}}><b>Nama Siswa:</b></td><td>{activePortfolio.studentName}</td></tr>
-                          <tr><td style={{color: '#475569'}}><b>Status Tugas:</b></td><td><span style={styles.statusBadge(activePortfolio.status)}>{activePortfolio.status}</span></td></tr>
+                          <tr><td style={{color: '#475569'}}><b>Status Validasi:</b></td><td><span style={styles.statusBadge(activePortfolio.status)}>{activePortfolio.status}</span></td></tr>
                           <tr><td style={{color: '#475569'}}><b>Mode & Waktu:</b></td><td>{activePortfolio.mode} | {activePortfolio.timestamp}</td></tr>
                         </tbody>
                       </table>
                       
                       <div style={styles.reviewContentBox}>
-                        <b style={{color: '#1e3a8a'}}>A. Naskah/Argumen Mentah:</b>
+                        <b style={{color: '#1e3a8a'}}>A. Naskah/Argumen Mentah yang Dianalisis:</b>
                         <p style={{fontStyle: 'italic', margin: '5px 0 15px 0', padding: '10px', background: '#f1f5f9', borderRadius: '4px'}}>{activePortfolio.naskahText}</p>
                         
-                        <b style={{color: '#1e3a8a'}}>B. Dekonstruksi Nalar Siswa (Fokus: {activePortfolio.ennis} & {activePortfolio.polya}):</b>
+                        <b style={{color: '#1e3a8a'}}>B. Dekonstruksi Nalar Siswa ({activePortfolio.ennis} & {activePortfolio.polya}):</b>
                         <p style={{background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', margin: '5px 0', minHeight: '80px'}}>{activePortfolio.deconstructionText}</p>
                       </div>
 
                       <div style={styles.diagnosticBox}>
-                        <b>HASIL EVALUASI MESIN AI (GEMINI):</b><br/>
+                        <b>HASIL PENILAIAN MESIN AI (GEMINI):</b><br/>
                         <p style={{margin: '5px 0 0 0'}}>{activePortfolio.diagnosis}</p>
                       </div>
 
@@ -672,7 +652,7 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                ) : <div style={styles.card}><p>Sistem belum mendeteksi portofolio tugas yang terselesaikan. Silakan kerjakan ujian di tab Kanvas terlebih dahulu.</p></div>}
+                ) : <div style={styles.card}><p>Sistem belum mendeteksi tugas yang terselesaikan. Silakan kerjakan ujian di tab "3. Ujian Kanvas".</p></div>}
               </div>
             )}
           </>
@@ -688,10 +668,10 @@ export default function App() {
                     <h2 style={{margin: '0 0 5px 0'}}>Laporan Evaluasi Kelas</h2>
                     <p style={{fontSize: '12px', color: '#64748b', margin: 0}} className="no-print">Petunjuk: Periksa pekerjaan siswa dan berikan ACC atau Minta Revisi. Siswa tidak bisa mencetak tugas Valid jika belum Anda ACC.</p>
                   </div>
-                  <button style={{...styles.btnSecondary, background: '#10b981'}} className="no-print" onClick={() => window.print()}>🖨️ Cetak Rekap Laporan</button>
+                  <button style={{...styles.btnSecondary, background: '#10b981'}} className="no-print" onClick={() => window.print()}>🖨️ Cetak Rekap Kelas</button>
                 </div>
 
-                {submissions.length === 0 ? <p style={{color: '#666', fontSize: '13px', background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px dashed #cbd5e1'}}>Belum ada tugas masuk dari siswa. Minta siswa untuk menyelesaikan ujian mereka.</p> : (
+                {submissions.length === 0 ? <p style={{color: '#666', fontSize: '13px', background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px dashed #cbd5e1'}}>Belum ada tugas masuk dari siswa. Minta siswa untuk menyelesaikan ujian mereka menggunakan KODE KELAS Anda.</p> : (
                   <table style={styles.table}>
                     <thead><tr style={{background: '#f1f5f9'}}><th>Nama Siswa</th><th>Status Validasi Guru</th><th className="no-print">Aksi Evaluasi</th></tr></thead>
                     <tbody>
@@ -713,7 +693,7 @@ export default function App() {
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px'}}>
                   <div>
                     <h2 style={{margin: '0 0 5px 0'}}>Kelola Daftar Siswa (Absensi)</h2>
-                    <p style={{fontSize: '12px', color: '#64748b', margin: 0}}>Petunjuk: Tambahkan nama-nama siswa di kelas ini. PIN Rahasia dibuat otomatis oleh sistem untuk login masing-masing siswa.</p>
+                    <p style={{fontSize: '12px', color: '#64748b', margin: 0}}>Petunjuk: Tambahkan nama-nama siswa di kelas ini. Saat siswa login, mereka hanya perlu memilih nama mereka tanpa butuh PIN tambahan.</p>
                   </div>
                   <button style={styles.btnDanger} onClick={handleResetClass}>⚠️ Kosongkan Kelas Total</button>
                 </div>
@@ -722,8 +702,7 @@ export default function App() {
                   e.preventDefault();
                   const name = e.target.sName.value.trim();
                   if(name) {
-                    const pin = Math.floor(1000 + Math.random() * 9000).toString();
-                    const updated = [...students, { id: Date.now(), name, pin }];
+                    const updated = [...students, { id: Date.now(), name }];
                     setStudents(updated);
                     const keys = getStorageKeys(currentClass, 'guru');
                     localStorage.setItem(keys.students, JSON.stringify(updated));
@@ -731,17 +710,16 @@ export default function App() {
                   }
                 }} style={{display: 'flex', gap: '8px', marginBottom: '20px', background: '#f8fafc', padding: '15px', borderRadius: '8px'}}>
                   <input name="sName" type="text" placeholder="Ketik nama siswa..." style={{...styles.input, margin: 0, flex: 1}} required />
-                  <button type="submit" style={{...styles.btnPrimary, background: '#2563eb', width: 'auto', margin: 0}}>+ Tambahkan ke Roster</button>
+                  <button type="submit" style={{...styles.btnPrimary, background: '#2563eb', width: 'auto', margin: 0}}>+ Tambahkan ke Daftar</button>
                 </form>
 
-                {students.length === 0 ? <p style={{fontSize: '13px', color: '#64748b'}}>Absensi kosong. Jika Anda tidak menambahkan siswa, siswa masih bisa login menggunakan fitur "Pendaftaran Mandiri".</p> : (
+                {students.length === 0 ? <p style={{fontSize: '13px', color: '#64748b'}}>Absensi kosong. Jika Anda tidak menambahkan siswa, siswa masih bisa login otomatis dengan mengetik nama mereka sendiri saat masuk.</p> : (
                   <table style={styles.table}>
-                    <thead><tr style={{background: '#f1f5f9', textAlign: 'left'}}><th>Nama Siswa</th><th>PIN Rahasia (Berikan ke Siswa)</th><th>Aksi</th></tr></thead>
+                    <thead><tr style={{background: '#f1f5f9', textAlign: 'left'}}><th>Nama Siswa di Kelas Ini</th><th>Aksi</th></tr></thead>
                     <tbody>
                       {students.map(s => (
                         <tr key={s.id} style={{borderBottom: '1px solid #e2e8f0'}}>
-                          <td>{s.name}</td>
-                          <td><b style={{background: '#fef3c7', padding: '4px 10px', borderRadius: '4px', letterSpacing: '1px'}}>{s.pin}</b></td>
+                          <td style={{padding: '12px'}}>{s.name}</td>
                           <td><button style={styles.btnDangerTable} onClick={() => handleDeleteStudent(s.id)}>Keluarkan</button></td>
                         </tr>
                       ))}
@@ -751,7 +729,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Modal Periksa Kerja Siswa Terperinci (Eksplisit untuk Guru) */}
+            {/* Modal Periksa Kerja Siswa Terperinci */}
             {selectedSubmission && (
               <div style={styles.modalOverlay} className="no-print">
                 <div style={{...styles.modalCard, width: '650px', maxWidth: '95%', maxHeight: '90vh', overflowY: 'auto'}}>
@@ -782,7 +760,7 @@ export default function App() {
 
                   <form onSubmit={(e) => e.preventDefault()} style={{marginTop: '20px', background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0'}}>
                     <label style={styles.label}>Berikan Catatan Penguji / Guru:</label>
-                    <p style={{fontSize: '11px', color: '#64748b', margin: '2px 0 10px 0'}}>Catatan ini akan tercetak di Sertifikat Nalar milik siswa.</p>
+                    <p style={{fontSize: '11px', color: '#64748b', margin: '2px 0 10px 0'}}>Catatan ini akan tercetak di Sertifikat/Laporan milik siswa.</p>
                     <textarea rows="3" placeholder="Tulis masukan, pujian, atau alasan menolak tugas ini..." value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={styles.textarea} />
                     <div style={{display: 'flex', gap: '10px', marginTop: '15px'}}>
                       <button type="button" style={{...styles.btnPrimary, background: '#16a34a', flex: 1}} onClick={() => handleTeacherAction(selectedSubmission.id, 'Disetujui Guru (ACC)')}>✅ ACC TUGAS</button>
