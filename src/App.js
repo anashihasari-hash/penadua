@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 
 export default function App() {
-  // State RBAC Peran Pengguna ('siswa' atau 'guru')
-  const [userRole, setUserRole] = useState('siswa'); 
-  const [activeTab, setActiveTab] = useState('landing'); // 'landing', 'apiKey', 'workspace', 'portfolio', 'guruDashboard'
-  
+  // State RBAC & Otentikasi
+  const [userRole, setUserRole] = useState('siswa'); // 'siswa' atau 'guru'
+  const [isGuruAuthed, setIsGuruAuthed] = useState(false); // Status Verifikasi PIN Guru
+  const [pinInput, setPinInput] = useState('');
+  const [showPinModal, setShowPinModal] = useState(false);
+
+  const [activeTab, setActiveTab] = useState('landing');
   const [apiKey, setApiKey] = useState('');
   const [selectedMode, setSelectedMode] = useState('mandiri');
 
-  // State Form Kanvas
+  // Form Kanvas
   const [formData, setFormData] = useState({
     studentName: '',
     problem: '',
@@ -17,7 +20,7 @@ export default function App() {
     deconstructionText: ''
   });
 
-  // State Database Lokal (Menyimpan Seluruh Pengiriman Siswa)
+  // Database Simulasi
   const [submissions, setSubmissions] = useState([
     {
       id: 1,
@@ -28,13 +31,41 @@ export default function App() {
       polya: 'Memahami Masalah',
       deconstructionText: 'AI hanya memproses pola data tanpa memiliki empati kognitif.',
       diagnosis: 'Kritis & Mendalam',
-      aiNotes: 'Argumentasi siswa logis dan relevan dengan teori kognitif.',
+      aiNotes: 'Argumentasi logis dan sesuai indikator.',
       timestamp: '15/10/2026, 14:30',
       status: 'Pending Review'
     }
   ]);
 
   const [activePortfolio, setActivePortfolio] = useState(null);
+
+  // Minta Akses Guru dengan PIN (RBAC Security Check)
+  const handleRequestGuruAccess = () => {
+    if (userRole === 'guru') {
+      // Kembali ke mode siswa
+      setUserRole('siswa');
+      setActiveTab('landing');
+      return;
+    }
+    // Jika masih siswa, tampilkan modal verifikasi PIN
+    setShowPinModal(true);
+  };
+
+  // Verifikasi PIN Rahasia Guru (Default: PENA2026)
+  const handleVerifyPin = (e) => {
+    e.preventDefault();
+    if (pinInput === 'PENA2026' || pinInput === '1234') {
+      setIsGuruAuthed(true);
+      setUserRole('guru');
+      setShowPinModal(false);
+      setPinInput('');
+      setActiveTab('guruDashboard');
+      alert('🔒 Otentikasi Guru Berhasil! Selamat Datang di Dashboard Guru.');
+    } else {
+      alert('❌ PIN Rahasia Guru Salah! Akses Ditolak.');
+      setPinInput('');
+    }
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -51,7 +82,6 @@ export default function App() {
     setActiveTab('workspace');
   };
 
-  // Poin 3 & 5: Pengiriman Fleksibel & Diagnostik AI
   const handleSubmitCanvas = (e) => {
     e.preventDefault();
     const length = formData.deconstructionText.trim().length;
@@ -61,7 +91,7 @@ export default function App() {
 
     if (length < 25) {
       diagnosis = 'Permukaan / Terindikasi Instan (Ketergantungan AI)';
-      aiNotes = 'Jawaban terlalu singkat. Siswa terindikasi menyalin mentah jawaban AI tanpa proses dekonstruksi mandiri.';
+      aiNotes = 'Jawaban terlalu singkat. Siswa terindikasi menyalin mentah jawaban AI.';
     }
 
     const newSubmission = {
@@ -83,14 +113,12 @@ export default function App() {
     setActiveTab('portfolio');
   };
 
-  // Poin 7: Fungsi Aksi Guru (ACC / Tolak)
   const handleTeacherAction = (id, newStatus) => {
     setSubmissions(prev =>
       prev.map(item => item.id === id ? { ...item, status: newStatus } : item)
     );
   };
 
-  // Poin 4: Unduh File Portofolio Beneran (Bukan Alert Scam!)
   const downloadPortfolioFile = () => {
     if (!activePortfolio) return;
     const content = `
@@ -104,7 +132,7 @@ Status Verifikasi: ${activePortfolio.status}
 - Teori Ennis  : ${activePortfolio.ennis}
 - Teori Polya  : ${activePortfolio.polya}
 
-[KASUS / KLAYM AI]
+[KASUS / KLAIM AI]
 ${activePortfolio.problem}
 
 [DEKONSTRUKSI NALAR SISWA]
@@ -128,28 +156,59 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
 
   return (
     <div style={styles.appContainer}>
-      {/* HEADER & SWITCH ROLE (RBAC CONTROL) */}
+      {/* HEADER & SWITCH ROLE (RBAC CONTROL WITH PIN) */}
       <header style={styles.header}>
         <div>
           <h2 style={styles.logoText}>PENA 🛡️ (Pertanggungjawaban Nalar)</h2>
           <span style={styles.roleBadge}>
-            Peran Saat Ini: <b>{userRole === 'siswa' ? '🎓 Siswa' : '👨‍🏫 Guru / Pengajar'}</b>
+            Peran Saat Ini: <b>{userRole === 'siswa' ? '🎓 Siswa (Privat Sandbox)' : '👨‍🏫 Guru (Akses Terverifikasi)'}</b>
           </span>
         </div>
 
-        {/* Tombol Ganti Peran RBAC */}
+        {/* Tombol Akses Terproteksi PIN */}
         <button 
-          style={styles.switchRoleBtn}
-          onClick={() => {
-            const nextRole = userRole === 'siswa' ? 'guru' : 'siswa';
-            setUserRole(nextRole);
-            if (nextRole === 'guru') setActiveTab('guruDashboard');
-            else setActiveTab('landing');
-          }}
+          style={userRole === 'guru' ? styles.guruActiveBtn : styles.switchRoleBtn}
+          onClick={handleRequestGuruAccess}
         >
-          🔄 Ganti Peran ke {userRole === 'siswa' ? 'Guru' : 'Siswa'}
+          {userRole === 'siswa' ? '🔒 Masuk Mode Guru (Butuh PIN)' : '🔓 Keluar dari Mode Guru'}
         </button>
       </header>
+
+      {/* MODAL VERIFIKASI PIN RAHASIA GURU */}
+      {showPinModal && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalCard}>
+            <h3>🔐 Otentikasi Khusus Guru (RBAC)</h3>
+            <p style={{fontSize: '13px', color: '#64748b'}}>
+              Akses ke Dashboard Guru dilindungi PIN Keamanan. Masukkan PIN Rahasia Guru untuk melanjutkan.
+            </p>
+            <p style={{fontSize: '11px', color: '#2563eb', fontWeight: 'bold'}}>
+              (Gunakan PIN Default Demo: <b>PENA2026</b> atau <b>1234</b>)
+            </p>
+            <form onSubmit={handleVerifyPin}>
+              <input
+                type="password"
+                placeholder="Masukkan PIN Guru..."
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                style={styles.input}
+                autoFocus
+                required
+              />
+              <div style={{display: 'flex', gap: '10px'}}>
+                <button type="submit" style={styles.primaryBtn}>Verifikasi PIN 🔑</button>
+                <button 
+                  type="button" 
+                  style={styles.cancelBtn} 
+                  onClick={() => { setShowPinModal(false); setPinInput(''); }}
+                >
+                  Batal
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* NAVIGASI BERDASARKAN PERAN */}
       <nav style={styles.navBar}>
@@ -162,7 +221,7 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
           </>
         ) : (
           <button style={activeTab === 'guruDashboard' ? styles.navBtnActive : styles.navBtn} onClick={() => setActiveTab('guruDashboard')}>
-            📊 Dashboard Kontrol Guru (RBAC Active)
+            📊 Dashboard Kontrol Guru (Akses Terverifikasi RBAC)
           </button>
         )}
       </nav>
@@ -283,7 +342,7 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
             <h2>Kartu E-Portofolio Digital Siswa</h2>
 
             {activePortfolio ? (
-              <div style={styles.portfolioPrintCard} id="printableCard">
+              <div style={styles.portfolioPrintCard}>
                 <div style={styles.cardHeader}>
                   <h3>🎓 KARTU VERIFIKASI NALAR SISWA</h3>
                   <span style={{fontSize: '12px', color: '#64748b'}}>{activePortfolio.timestamp}</span>
@@ -304,7 +363,6 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
                   <p><b>Catatan Evaluasi:</b> {activePortfolio.aiNotes}</p>
                 </div>
 
-                {/* DUA TOMBOL AKSI CETAK / DOWNLOAD BENERAN */}
                 <div style={{display: 'flex', gap: '10px', marginTop: '15px'}}>
                   <button style={styles.secondaryBtn} onClick={() => window.print()}>
                     🖨️ Cetak / Simpan PDF (Print)
@@ -321,10 +379,10 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
         )}
 
         {/* ================= 7. DASHBOARD KONTROL GURU (RBAC) ================= */}
-        {activeTab === 'guruDashboard' && userRole === 'guru' && (
+        {activeTab === 'guruDashboard' && userRole === 'guru' && isGuruAuthed && (
           <div style={styles.card}>
             <span style={styles.badge}>Poin 7: RBAC Guru Dashboard</span>
-            <h2>Panel Kontrol Administratif Guru</h2>
+            <h2>Panel Kontrol Administratif Guru (Protected)</h2>
             <p style={{fontSize: '13px', color: '#475569'}}>
               Hak akses khusus guru untuk meninjau hasil latihan siswa, memvalidasi laporan diagnostik AI, dan memberikan persetujuan (ACC/Revisi).
             </p>
@@ -373,13 +431,17 @@ Catatan Evaluasi: ${activePortfolio.aiNotes}
   );
 }
 
-// Styling CSS
+// CSS Styling
 const styles = {
   appContainer: { fontFamily: 'sans-serif', maxWidth: '800px', margin: '20px auto', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '10px' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', color: 'white', padding: '15px', borderRadius: '8px' },
   logoText: { margin: 0, fontSize: '18px' },
   roleBadge: { fontSize: '12px', color: '#93c5fd' },
-  switchRoleBtn: { backgroundColor: '#3b82f6', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' },
+  switchRoleBtn: { backgroundColor: '#dc2626', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' },
+  guruActiveBtn: { backgroundColor: '#16a34a', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' },
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  modalCard: { backgroundColor: 'white', padding: '25px', borderRadius: '10px', maxWidth: '400px', width: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' },
+  cancelBtn: { backgroundColor: '#94a3b8', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' },
   navBar: { display: 'flex', gap: '8px', margin: '15px 0' },
   navBtn: { backgroundColor: '#cbd5e1', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
   navBtnActive: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' },
@@ -388,7 +450,7 @@ const styles = {
   badge: { backgroundColor: '#dbeafe', color: '#1e40af', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' },
   title: { fontSize: '20px', margin: '10px 0' },
   paragraph: { fontSize: '14px', color: '#475569' },
-  primaryBtn: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', width: '100%', marginTop: '10px' },
+  primaryBtn: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', flex: 1, marginTop: '10px' },
   secondaryBtn: { backgroundColor: '#475569', color: 'white', border: 'none', padding: '10px', borderRadius: '5px', cursor: 'pointer', flex: 1, fontSize: '12px', fontWeight: 'bold' },
   downloadBtn: { backgroundColor: '#16a34a', color: 'white', border: 'none', padding: '10px', borderRadius: '5px', cursor: 'pointer', flex: 1, fontSize: '12px', fontWeight: 'bold' },
   input: { width: '100%', padding: '8px', margin: '8px 0 15px 0', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box' },
