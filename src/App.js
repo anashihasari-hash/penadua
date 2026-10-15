@@ -49,10 +49,10 @@ export default function App() {
   const [mandiriNameInput, setMandiriNameInput] = useState('');
 
   const getStorageKeys = (kelas, role) => {
-    if (role === 'mandiri') return { students: 'PENA_MANDIRI_STU_ISOLATED', submissions: 'PENA_MANDIRI_SUB_ISOLATED' };
-    if (!kelas) return { students: 'PENA_STU_DEFAULT', submissions: 'PENA_SUB_DEFAULT' };
+    if (role === 'mandiri') return { students: 'PENA_MANDIRI_STU_ISO', submissions: 'PENA_MANDIRI_SUB_ISO' };
+    if (!kelas) return { students: 'PENA_STU_DEF', submissions: 'PENA_SUB_DEF' };
     const prefix = `PENA_${kelas.teacher}_${kelas.subject}_${kelas.pin}`.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
-    return { students: `${prefix}_STUDENTS`, submissions: `${prefix}_SUBMISSIONS` };
+    return { students: `${prefix}_STU`, submissions: `${prefix}_SUB` };
   };
 
   const [students, setStudents] = useState([]);
@@ -82,7 +82,7 @@ export default function App() {
     } catch (e) { console.error(e); }
   }, [currentClass, userRole]);
 
-  // Polling Sinkronisasi Realtime (Sesuai kode awal lu)
+  // Polling Sinkronisasi Realtime
   useEffect(() => {
     const interval = setInterval(() => {
       try {
@@ -106,15 +106,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentClass, userRole, allClasses, submissions, students]);
 
-  useEffect(() => {
-    localStorage.setItem('PENA_ALL_CLASSES', JSON.stringify(allClasses));
-    const keys = getStorageKeys(currentClass, userRole);
-    if (userRole !== 'mandiri' && currentClass) {
-      localStorage.setItem(keys.students, JSON.stringify(students));
-    }
-    localStorage.setItem(keys.submissions, JSON.stringify(submissions));
-  }, [students, submissions, currentClass, allClasses, userRole]);
-
   // Login Siswa Berdasarkan Kode Akses Kelas
   const [classCodeInput, setClassCodeInput] = useState('');
   const [loginStudentName, setLoginStudentName] = useState('');
@@ -136,7 +127,6 @@ export default function App() {
     }
   };
 
-  // Mekanisme Keamanan Login Siswa (Manual Input + Typo Tolerance)
   const handleStudentLoginFinal = (e) => {
     e.preventDefault();
     const inputName = loginStudentName.trim().toLowerCase();
@@ -178,6 +168,11 @@ export default function App() {
     e.preventDefault();
     const name = mandiriNameInput.trim();
     if (!name) return;
+    
+    // Reset data sebelumnya agar tidak bocor
+    setSubmissions([]);
+    setStudents([]);
+    
     setCurrentStudent({ id: 'mandiri-' + Date.now(), name });
     setUserRole('mandiri');
     setShowMandiriModal(false);
@@ -185,16 +180,21 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    session.clear(); // Bersihkan ingatan refresh
+    session.clear(); 
     setCurrentStudent(null);
     setCurrentClass(null);
     setUserRole(null);
+    
+    // Reset array data lokal di UI
+    setSubmissions([]);
+    setStudents([]);
+    
     setIsApiValid(false);
     setActiveTab('landing');
     setClassCodeInput('');
   };
 
-  // Pelanggaran & Kanvas Nalar dengan Pemantik Elaborasi
+  // Pelanggaran & Kanvas Nalar
   const [isPasted, setIsPasted] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [formData, setFormData] = useState({
@@ -233,7 +233,6 @@ export default function App() {
     setActiveTab('workspace');
   };
 
-  // Mesin Analisis Kritis AI (Simulasi Dummy Sesuai Kode Awal)
   const handleSubmitCanvas = (e) => {
     e.preventDefault();
     if (!isApiValid) { alert('Masukkan API Key terlebih dahulu di tab 2.'); return; }
@@ -248,11 +247,11 @@ export default function App() {
       if (hasViolations) {
         diagnosis = `[GAGAL INTEGRITAS] Terdeteksi anomali (Pindah tab: ${tabSwitchCount}x, Copy-paste: ${isPasted ? 'Terdeteksi' : 'Tidak'}). Argumen didiskualifikasi karena indikasi manipulasi eksternal.`;
       } else if (wordCount < 25) {
-        diagnosis = `[TIDAK LOLOS KRITIS] Penjabaran terlalu dangkal (${wordCount} kata). Gagal menjawab pertanyaan pemantik elaborasi kerangka ${formData.ennisIndicator} & tahap ${formData.polyaStep}. Diperlukan uraian kausalitas yang lebih mendalam.`;
+        diagnosis = `[TIDAK LOLOS KRITIS] Penjabaran terlalu dangkal (${wordCount} kata). Gagal menjawab pertanyaan pemantik elaborasi. Diperlukan uraian kausalitas yang lebih mendalam.`;
       } else if (text.toLowerCase().includes('gak tau') || text.toLowerCase().includes('asal')) {
         diagnosis = `[DITOLAK] Respons terdeteksi tidak serius atau asal-asalan. Analisis nalar logis tidak terpenuhi sama sekali.`;
       } else {
-        diagnosis = `[LOLOS KRITIS MENDALAM] Analisis otentik terverifikasi. Siswa berhasil menjawab pemantik konseptual ${formData.ennisIndicator} dengan eksekusi metodologis ${formData.polyaStep}. Argumen valid, logis, dan dapat dipertanggungjawabkan.`;
+        diagnosis = `[LOLOS KRITIS MENDALAM] Analisis otentik terverifikasi. Siswa berhasil menjawab pemantik konseptual ${formData.ennisIndicator} dengan eksekusi metodologis ${formData.polyaStep}. Argumen valid dan logis.`;
       }
 
       const newSubmission = {
@@ -271,7 +270,14 @@ export default function App() {
       };
       
       const filtered = submissions.filter(s => s.studentName !== currentStudent.name);
-      setSubmissions([newSubmission, ...filtered]);
+      const updatedSubmissions = [newSubmission, ...filtered];
+      
+      setSubmissions(updatedSubmissions);
+      
+      // Force save ke localStorage
+      const keys = getStorageKeys(currentClass, userRole);
+      localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
+
       setIsPasted(false); setTabSwitchCount(0); setIsSubmittingTask(false);
       setActiveTab('portfolio');
     }, 900);
@@ -281,7 +287,13 @@ export default function App() {
   const [teacherNoteInput, setTeacherNoteInput] = useState('');
 
   const handleTeacherAction = (id, status) => {
-    setSubmissions(prev => prev.map(item => item.id === id ? { ...item, status, teacherFeedback: teacherNoteInput } : item));
+    const updatedSubmissions = submissions.map(item => item.id === id ? { ...item, status, teacherFeedback: teacherNoteInput } : item);
+    setSubmissions(updatedSubmissions);
+    
+    // Perbaikan: Paksa simpan detik itu juga biar guru ga ilang datanya
+    const keys = getStorageKeys(currentClass, userRole);
+    localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
+    
     setSelectedSubmission(null);
     setTeacherNoteInput('');
   };
@@ -299,30 +311,40 @@ export default function App() {
       `}} />
 
       <header style={styles.header} className="no-print">
-        <h2 style={styles.logoText}>PENA</h2>
+        <h2 style={styles.logoText}>PENA Pilar Dua</h2>
         {userRole && <button style={styles.textBtn} onClick={handleLogout}>Keluar</button>}
       </header>
 
       {/* LANDING PAGE */}
       {!userRole && activeTab === 'landing' && (
         <div style={styles.card} className="no-print">
-          <h1 style={styles.title}>PENA</h1>
-          <p style={styles.subtitle}>Platform Pertanggungjawaban Nalar & Evaluasi Kritis</p>
+          <h1 style={styles.title}>PENA Pilar Dua</h1>
+          <p style={styles.subtitle}>Platform Pertanggungjawaban Nalar & Evaluasi Kritis Berbasis AI</p>
+          
+          <div style={styles.introBox}>
+            <p style={{margin: '0 0 10px 0'}}><b>Tiga Pilar Evaluasi:</b></p>
+            <ul style={{margin: 0, paddingLeft: '20px', lineHeight: '1.6'}}>
+              <li><b>Siswa:</b> Ruang kelas interaktif untuk mendemonstrasikan ketajaman argumen.</li>
+              <li><b>Guru:</b> Dasbor evaluasi komprehensif untuk memantau integritas dan kualitas nalar.</li>
+              <li><b>Mandiri:</b> Simulasi privat tanpa batas untuk melatih kerangka berpikir.</li>
+            </ul>
+          </div>
+
           <div style={styles.gridMenu}>
             <div style={styles.menuBox} onClick={() => setActiveTab('loginSiswa')}>
-              <h3>Siswa</h3><p>Masuk menggunakan kode kelas.</p>
+              <h3>🎓 Siswa</h3><p>Masuk menggunakan kode kelas dari guru.</p>
             </div>
             <div style={styles.menuBox} onClick={() => setShowMandiriModal(true)}>
-              <h3>Mandiri</h3><p>Simulasi latihan personal (Isolasi).</p>
+              <h3>👤 Mandiri</h3><p>Simulasi latihan personal secara terisolasi.</p>
             </div>
             <div style={styles.menuBox} onClick={() => setShowPinModal(true)}>
-              <h3>Guru</h3><p>Kelola kelas & evaluasi.</p>
+              <h3>👨‍🏫 Guru</h3><p>Kelola kelas, evaluasi, dan validasi tugas.</p>
             </div>
           </div>
         </div>
       )}
 
-      {/* LOGIN SISWA BERDASARKAN KODE AKSES KELAS */}
+      {/* LOGIN SISWA */}
       {!userRole && activeTab === 'loginSiswa' && (
         <div style={styles.card} className="no-print">
           <button style={styles.backBtn} onClick={() => setActiveTab('landing')}>← Kembali</button>
@@ -339,8 +361,8 @@ export default function App() {
               <div style={{background: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '13px', marginBottom: '10px'}}>
                 📚 Kelas: <b>{currentClass.subject}</b> ({currentClass.teacher})
               </div>
-              <label>Ketik Nama Anda (Manual):</label>
-              <input type="text" placeholder="Masukkan nama..." value={loginStudentName} onChange={(e) => setLoginStudentName(e.target.value)} style={styles.input} required />
+              <label>Ketik Nama Lengkap Anda:</label>
+              <input type="text" placeholder="Sesuai pendaftaran guru..." value={loginStudentName} onChange={(e) => setLoginStudentName(e.target.value)} style={styles.input} required />
               
               <label>PIN Siswa (4 Digit):</label>
               <input type="password" placeholder="Masukkan PIN..." value={loginStudentPin} onChange={(e) => setLoginStudentPin(e.target.value)} style={styles.input} required />
@@ -354,7 +376,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL SETUP / LOGIN GURU */}
+      {/* MODAL GURU */}
       {showPinModal && (
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard}>
@@ -380,12 +402,12 @@ export default function App() {
       {showMandiriModal && (
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard}>
-            <h3>Mode Mandiri (Terisolasi)</h3>
+            <h3>Mode Mandiri</h3>
             <form onSubmit={handleMandiriLogin}>
-              <label>Nama:</label>
+              <label>Nama Pengguna:</label>
               <input type="text" placeholder="Masukkan nama..." value={mandiriNameInput} onChange={(e) => setMandiriNameInput(e.target.value)} style={styles.input} required />
               <div style={styles.modalActions}>
-                <button type="submit" style={styles.btnPrimary}>Mulai</button>
+                <button type="submit" style={styles.btnPrimary}>Mulai Ujian</button>
                 <button type="button" style={styles.textBtn} onClick={() => setShowMandiriModal(false)}>Batal</button>
               </div>
             </form>
@@ -393,12 +415,12 @@ export default function App() {
         </div>
       )}
 
-      {/* NAVIGASI UTAMA */}
+      {/* NAVIGASI */}
       {userRole && (
         <nav style={styles.navBar} className="no-print">
           {(userRole === 'siswa' || userRole === 'mandiri') && (
             <>
-              <span style={styles.navBadge}>{userRole === 'mandiri' ? 'Mandiri' : currentClass?.subject}</span>
+              <span style={styles.navBadge}>{userRole === 'mandiri' ? 'Mode Mandiri' : currentClass?.subject}</span>
               <button style={activeTab === 'introSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('introSiswa')}>Instruksi</button>
               <button style={activeTab === 'apiKey' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('apiKey')}>AI Key</button>
               <button style={activeTab === 'workspace' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('workspace')}>Kanvas</button>
@@ -420,8 +442,16 @@ export default function App() {
           <>
             {activeTab === 'introSiswa' && (
               <div style={styles.card} className="no-print">
-                <h2>Halo, {currentStudent.name}.</h2>
-                <p style={{color: '#555', lineHeight: '1.6'}}>Pastikan naskah dan argumen dikerjakan secara otentik. Sistem memantau perpindahan tab dan integritas teks tulisan.</p>
+                <h2>Selamat Datang, {currentStudent.name}! 👋</h2>
+                <div style={styles.introBox}>
+                  <p style={{marginTop: 0}}><b>📚 Tata Cara Pengerjaan PENA Pilar Dua:</b></p>
+                  <ul style={{lineHeight: '1.6', color: '#444', paddingLeft: '20px', marginBottom: 0}}>
+                    <li><b>Pahami Konteks:</b> Baca naskah tugas dengan teliti sebelum memulai dekonstruksi argumen.</li>
+                    <li><b>Pilih Kerangka:</b> Tentukan indikator Ennis dan langkah Polya yang paling sesuai dengan arah nalar kritismu.</li>
+                    <li><b>Jaga Integritas:</b> Dilarang keras melakukan manipulasi seperti pindah tab pencarian atau <i>Copy-Paste</i> (kecuali kutipan). Sistem memantau penuh setiap pergerakan.</li>
+                    <li><b>Siapkan AI:</b> Masuk ke menu berikutnya untuk menghubungkan kunci API ke mesin evaluasi.</li>
+                  </ul>
+                </div>
                 <button style={styles.btnPrimary} onClick={() => setActiveTab('apiKey')}>Lanjut ke Setup AI →</button>
               </div>
             )}
@@ -430,10 +460,10 @@ export default function App() {
               <div style={styles.card} className="no-print">
                 <h2>Otentikasi Kunci AI</h2>
                 <form onSubmit={checkApiValidity}>
-                  <input type="password" placeholder="Masukkan kunci akses..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} required />
-                  <button type="submit" style={styles.btnPrimary}>Hubungkan</button>
+                  <input type="password" placeholder="Masukkan kunci akses Gemini..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} required />
+                  <button type="submit" style={styles.btnPrimary}>Hubungkan Mesin</button>
                 </form>
-                {isApiValid && <p style={{color: '#059669', fontSize: '13px', marginTop: '10px'}}>Terhubung dengan sistem analitis.</p>}
+                {isApiValid && <p style={{color: '#059669', fontSize: '13px', marginTop: '10px'}}>✅ Sistem analitis terhubung dan siap digunakan.</p>}
               </div>
             )}
 
@@ -441,13 +471,13 @@ export default function App() {
               <div style={styles.card} className="no-print">
                 {isWorkspaceLocked ? (
                   <div style={{textAlign: 'center', padding: '30px'}}>
-                    <h3>Tugas Telah Dikirim</h3>
-                    <p style={{color: '#666'}}>Silakan periksa tab Portofolio untuk melihat status validasi.</p>
+                    <h3>Tugas Telah Terkirim 🔒</h3>
+                    <p style={{color: '#666'}}>Silakan periksa tab Portofolio untuk melihat progres atau revisi dari guru.</p>
                   </div>
                 ) : (
                   <>
                     <h2>Kanvas Nalar</h2>
-                    {!isApiValid && <div style={{background: '#fef2f2', color: '#991b1b', padding: '10px', fontSize: '13px', marginBottom: '10px'}}>Hubungkan kunci AI di tab sebelumnya terlebih dahulu.</div>}
+                    {!isApiValid && <div style={{background: '#fef2f2', color: '#991b1b', padding: '10px', fontSize: '13px', marginBottom: '10px'}}>⚠️ Harap hubungkan kunci AI di tab sebelumnya terlebih dahulu.</div>}
                     
                     <div style={styles.monitor}>
                       <span>Pindah Tab: <b>{tabSwitchCount}x</b></span>
@@ -456,7 +486,7 @@ export default function App() {
 
                     <form onSubmit={handleSubmitCanvas}>
                       <label>1. Kutipan Naskah Utama:</label>
-                      <textarea rows="3" value={formData.naskahText} onChange={(e) => setFormData({...formData, naskahText: e.target.value})} style={styles.textarea} required />
+                      <textarea rows="3" placeholder="Salin kutipan masalah di sini..." value={formData.naskahText} onChange={(e) => setFormData({...formData, naskahText: e.target.value})} style={styles.textarea} required />
 
                       <div style={{display: 'flex', gap: '10px', margin: '10px 0'}}>
                         <div style={{flex: 1}}>
@@ -475,15 +505,15 @@ export default function App() {
 
                       <div style={styles.promptBox}>
                         <p style={{margin: '0 0 4px 0', fontWeight: 'bold'}}>💡 Pemantik Konteks Wajib:</p>
-                        <p style={{margin: 0, color: '#333'}}>{ennisPrompts[formData.ennisIndicator]}</p>
-                        <p style={{margin: '4px 0 0 0', color: '#333'}}>{polyaPrompts[formData.polyaStep]}</p>
+                        <p style={{margin: 0, color: '#333'}}>- {ennisPrompts[formData.ennisIndicator]}</p>
+                        <p style={{margin: '4px 0 0 0', color: '#333'}}>- {polyaPrompts[formData.polyaStep]}</p>
                       </div>
 
                       <label style={{marginTop: '10px', display: 'block'}}>4. Uraian Pemikiran Kritis (Jawab elaborasi di atas):</label>
-                      <textarea rows="5" value={formData.deconstructionText} onChange={(e) => setFormData({...formData, deconstructionText: e.target.value})} onPaste={() => setIsPasted(true)} style={styles.textarea} required />
+                      <textarea rows="5" placeholder="Tuliskan argumen orisinalmu..." value={formData.deconstructionText} onChange={(e) => setFormData({...formData, deconstructionText: e.target.value})} onPaste={() => setIsPasted(true)} style={styles.textarea} required />
 
                       <button type="submit" style={styles.btnPrimary} disabled={!isApiValid || isSubmittingTask}>
-                        {isSubmittingTask ? 'Memproses Analisis...' : 'Kirim Tugas'}
+                        {isSubmittingTask ? 'Memproses Analisis AI...' : 'Kirim Tugas'}
                       </button>
                     </form>
                   </>
@@ -494,22 +524,28 @@ export default function App() {
             {activeTab === 'portfolio' && (
               <div>
                 <div style={{marginBottom: '10px'}} className="no-print">
-                  <button style={styles.btnSecondary} onClick={() => window.print()}>Cetak / Simpan PDF</button>
+                  <button style={styles.btnSecondary} onClick={() => window.print()}>🖨️ Cetak / Simpan PDF</button>
                 </div>
                 {activePortfolio ? (
                   <div id="certPrintArea" style={styles.certBox}>
-                    <h3>SERTIFIKAT UJI NALAR</h3>
-                    <p style={{fontSize: '11px', color: '#666'}}>ID: {activePortfolio.certNumber}</p>
+                    <h3 style={{marginTop: 0, textAlign: 'center'}}>SERTIFIKAT UJI NALAR<br/>PENA PILAR DUA</h3>
+                    <p style={{fontSize: '11px', color: '#666', textAlign: 'center'}}>ID Validasi: {activePortfolio.certNumber}</p>
                     <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
                     <p><b>Nama:</b> {activePortfolio.studentName}</p>
-                    <p><b>Status:</b> {activePortfolio.status}</p>
-                    <p><b>Kerangka:</b> Ennis ({activePortfolio.ennis}) & Polya ({activePortfolio.polya})</p>
-                    <p><b>Naskah:</b> "{activePortfolio.naskahText}"</p>
-                    <p><b>Dekonstruksi:</b> "{activePortfolio.deconstructionText}"</p>
-                    <p><b>Diagnosis AI:</b> {activePortfolio.diagnosis}</p>
-                    {activePortfolio.teacherFeedback && <p><b>Catatan Guru:</b> {activePortfolio.teacherFeedback}</p>}
+                    <p><b>Status Tugas:</b> <span style={{padding: '3px 8px', background: '#eee', borderRadius: '4px'}}>{activePortfolio.status}</span></p>
+                    <p><b>Metode:</b> Ennis ({activePortfolio.ennis}) & Polya ({activePortfolio.polya})</p>
+                    <p><b>Kutipan Kasus:</b> "{activePortfolio.naskahText}"</p>
+                    <p><b>Resolusi & Dekonstruksi:</b> "{activePortfolio.deconstructionText}"</p>
+                    <div style={{background: '#f9f9f9', padding: '10px', borderLeft: '3px solid #111', marginTop: '10px'}}>
+                      <p style={{margin: 0}}><b>Diagnosis Mesin AI:</b><br/>{activePortfolio.diagnosis}</p>
+                    </div>
+                    {activePortfolio.teacherFeedback && (
+                      <div style={{background: '#fef2f2', padding: '10px', borderLeft: '3px solid #dc2626', marginTop: '10px'}}>
+                         <p style={{margin: 0}}><b>Umpan Balik Guru:</b><br/>{activePortfolio.teacherFeedback}</p>
+                      </div>
+                    )}
                   </div>
-                ) : <p>Belum ada data tugas.</p>}
+                ) : <div style={styles.card}><p style={{margin: 0}}>Belum ada data tugas yang terkirim.</p></div>}
               </div>
             )}
           </>
@@ -519,16 +555,16 @@ export default function App() {
           <>
             {activeTab === 'guruDashboard' && (
               <div style={styles.card} className="no-print">
-                <h2>Evaluasi Kelas ({currentClass?.subject})</h2>
-                {submissions.length === 0 ? <p style={{color: '#666', fontSize: '13px'}}>Belum ada tugas masuk.</p> : (
+                <h2>Dasbor Evaluasi Kelas ({currentClass?.subject})</h2>
+                {submissions.length === 0 ? <p style={{color: '#666', fontSize: '13px'}}>Belum ada tugas masuk dari siswa.</p> : (
                   <table style={styles.table}>
-                    <thead><tr><th>Siswa</th><th>Status</th><th>Aksi</th></tr></thead>
+                    <thead><tr><th style={{textAlign: 'left'}}>Nama Siswa</th><th style={{textAlign: 'left'}}>Status</th><th>Aksi</th></tr></thead>
                     <tbody>
                       {submissions.map(sub => (
-                        <tr key={sub.id}>
-                          <td>{sub.studentName}</td>
-                          <td>{sub.status}</td>
-                          <td><button style={styles.btnTable} onClick={() => setSelectedSubmission(sub)}>Periksa</button></td>
+                        <tr key={sub.id} style={{borderBottom: '1px solid #eee'}}>
+                          <td style={{padding: '8px 0'}}>{sub.studentName}</td>
+                          <td style={{padding: '8px 0'}}>{sub.status}</td>
+                          <td style={{padding: '8px 0', textAlign: 'center'}}><button style={styles.btnTable} onClick={() => setSelectedSubmission(sub)}>Periksa</button></td>
                         </tr>
                       ))}
                     </tbody>
@@ -539,21 +575,21 @@ export default function App() {
 
             {activeTab === 'guruSiswa' && (
               <div style={styles.card} className="no-print">
-                <h2>Kelola Daftar Siswa</h2>
+                <h2>Manajemen Daftar Siswa</h2>
                 <form onSubmit={(e) => {
                   e.preventDefault();
                   const name = e.target.sName.value.trim();
                   if(name) {
                     const pin = Math.floor(1000 + Math.random() * 9000).toString();
                     setStudents([...students, { id: Date.now(), name, pin }]);
-                    e.target.sName.value = ''; alert(`Siswa ditambahkan. PIN: ${pin}`);
+                    e.target.sName.value = ''; alert(`Siswa ditambahkan. Ingat berikan PIN ini ke siswa: ${pin}`);
                   }
                 }} style={{display: 'flex', gap: '8px', marginBottom: '15px'}}>
-                  <input name="sName" type="text" placeholder="Nama siswa..." style={{...styles.input, margin: 0, flex: 1}} required />
+                  <input name="sName" type="text" placeholder="Masukkan nama siswa..." style={{...styles.input, margin: 0, flex: 1}} required />
                   <button type="submit" style={{...styles.btnPrimary, width: 'auto', margin: 0}}>Tambah</button>
                 </form>
                 <ul style={{paddingLeft: '15px', fontSize: '13px', color: '#444'}}>
-                  {students.map(s => <li key={s.id}>{s.name} (PIN: {s.pin})</li>)}
+                  {students.map(s => <li key={s.id} style={{marginBottom: '5px'}}><b>{s.name}</b> (PIN Akses: <span style={{color: '#dc2626', fontWeight: 'bold'}}>{s.pin}</span>)</li>)}
                 </ul>
               </div>
             )}
@@ -561,25 +597,26 @@ export default function App() {
             {selectedSubmission && (
               <div style={styles.modalOverlay} className="no-print">
                 <div style={styles.modalCardLarge}>
-                  <h3>Laporan Evaluasi: {selectedSubmission.studentName}</h3>
-                  <div style={{fontSize: '13px', background: '#f9f9f9', padding: '12px', borderRadius: '4px', margin: '10px 0', maxHeight: '250px', overflowY: 'auto'}}>
-                    <p><b>Mode:</b> {selectedSubmission.mode}</p>
-                    <p><b>Waktu Submit:</b> {selectedSubmission.timestamp}</p>
-                    <p><b>Indikator:</b> Ennis ({selectedSubmission.ennis}) & Polya ({selectedSubmission.polya})</p>
+                  <h3>Laporan Evaluasi Nalar</h3>
+                  <div style={{fontSize: '13px', background: '#f9f9f9', padding: '15px', borderRadius: '6px', margin: '10px 0', maxHeight: '280px', overflowY: 'auto', border: '1px solid #e5e5e5'}}>
+                    <p style={{margin: '0 0 5px 0'}}><b>👤 Nama Siswa:</b> {selectedSubmission.studentName}</p>
+                    <p style={{margin: '0 0 5px 0'}}><b>🕒 Waktu Submit:</b> {selectedSubmission.timestamp}</p>
+                    <p style={{margin: '0 0 10px 0'}}><b>📌 Indikator:</b> Ennis ({selectedSubmission.ennis}) & Polya ({selectedSubmission.polya})</p>
                     <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
                     <p><b>Kutipan Naskah:</b> <br/><i>"{selectedSubmission.naskahText}"</i></p>
-                    <p><b>Uraian Dekonstruksi Siswa:</b> <br/>"{selectedSubmission.deconstructionText}"</p>
+                    <p><b>Uraian Dekonstruksi:</b> <br/>"{selectedSubmission.deconstructionText}"</p>
                     <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
-                    <p><b>Hasil Diagnosis AI:</b> <br/><span style={{color: '#b91c1c'}}>{selectedSubmission.diagnosis}</span></p>
+                    <p style={{margin: '0 0 5px 0'}}><b>🤖 Diagnosis AI & Integritas:</b></p>
+                    <span style={{color: '#b91c1c', display: 'block', padding: '8px', background: '#fef2f2', borderRadius: '4px'}}>{selectedSubmission.diagnosis}</span>
                   </div>
                   
-                  <label><b>Catatan / Tindak Lanjut Guru:</b></label>
-                  <textarea rows="3" placeholder="Tulis catatan revisi atau apresiasi..." value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={styles.textarea} />
+                  <label style={{fontSize: '13px', fontWeight: '600'}}>Catatan / Tindak Lanjut Guru:</label>
+                  <textarea rows="3" placeholder="Berikan catatan revisi atau apresiasi..." value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={{...styles.textarea, marginTop: '5px'}} />
                   
                   <div style={styles.modalActions}>
-                    <button style={styles.btnPrimary} onClick={() => handleTeacherAction(selectedSubmission.id, 'Disetujui Guru (ACC)')}>ACC / Setujui</button>
-                    <button style={styles.btnDanger} onClick={() => handleTeacherAction(selectedSubmission.id, 'Minta Revisi')}>Minta Revisi</button>
-                    <button style={styles.textBtn} onClick={() => setSelectedSubmission(null)}>Tutup</button>
+                    <button style={{...styles.btnPrimary, flex: 1}} onClick={() => handleTeacherAction(selectedSubmission.id, 'Disetujui Guru (ACC)')}>ACC / Lulus</button>
+                    <button style={{...styles.btnDanger, flex: 1}} onClick={() => handleTeacherAction(selectedSubmission.id, 'Minta Revisi')}>Minta Revisi</button>
+                    <button style={styles.textBtn} onClick={() => setSelectedSubmission(null)}>Batal</button>
                   </div>
                 </div>
               </div>
@@ -594,32 +631,33 @@ export default function App() {
 const styles = {
   appContainer: { fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', maxWidth: '750px', margin: '30px auto', padding: '15px', color: '#111' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e5e5', paddingBottom: '12px', marginBottom: '20px' },
-  logoText: { margin: 0, fontSize: '16px', fontWeight: '700', letterSpacing: '1px' },
-  card: { background: '#fff', border: '1px solid #e5e5e5', borderRadius: '8px', padding: '25px' },
-  title: { fontSize: '22px', fontWeight: '700', marginBottom: '5px', textAlign: 'center' },
-  subtitle: { fontSize: '13px', color: '#666', textAlign: 'center', marginBottom: '20px' },
-  gridMenu: { display: 'flex', gap: '10px' },
-  menuBox: { flex: 1, border: '1px solid #e5e5e5', borderRadius: '6px', padding: '15px', cursor: 'pointer', textAlign: 'center', background: '#fafafa' },
+  logoText: { margin: 0, fontSize: '18px', fontWeight: '800', letterSpacing: '0.5px' },
+  card: { background: '#fff', border: '1px solid #e5e5e5', borderRadius: '8px', padding: '25px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
+  title: { fontSize: '24px', fontWeight: '800', marginBottom: '8px', textAlign: 'center' },
+  subtitle: { fontSize: '14px', color: '#666', textAlign: 'center', marginBottom: '25px' },
+  introBox: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '15px', marginBottom: '20px', fontSize: '13.5px' },
+  gridMenu: { display: 'flex', gap: '12px' },
+  menuBox: { flex: 1, border: '1px solid #e5e5e5', borderRadius: '6px', padding: '15px', cursor: 'pointer', textAlign: 'center', background: '#fafafa', transition: 'all 0.2s' },
   form: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' },
-  input: { width: '100%', padding: '9px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '14px', boxSizing: 'border-box' },
-  textarea: { width: '100%', padding: '9px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '14px', boxSizing: 'border-box', resize: 'vertical' },
-  btnPrimary: { background: '#111', color: '#fff', border: 'none', padding: '10px', borderRadius: '4px', fontWeight: '600', cursor: 'pointer', width: '100%', fontSize: '14px' },
+  input: { width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '14px', boxSizing: 'border-box' },
+  textarea: { width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '14px', boxSizing: 'border-box', resize: 'vertical' },
+  btnPrimary: { background: '#111', color: '#fff', border: 'none', padding: '12px', borderRadius: '4px', fontWeight: '600', cursor: 'pointer', width: '100%', fontSize: '14px' },
   btnSecondary: { background: '#555', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' },
-  btnDanger: { background: '#dc2626', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' },
-  btnTable: { background: '#111', color: '#fff', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
-  textBtn: { background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '13px', textDecoration: 'underline' },
-  backBtn: { background: 'none', border: 'none', color: '#111', cursor: 'pointer', fontSize: '13px', marginBottom: '10px', padding: 0 },
+  btnDanger: { background: '#dc2626', color: '#fff', border: 'none', padding: '12px', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '14px' },
+  btnTable: { background: '#111', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
+  textBtn: { background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '14px', textDecoration: 'underline', padding: '10px' },
+  backBtn: { background: 'none', border: 'none', color: '#111', cursor: 'pointer', fontSize: '13px', marginBottom: '15px', padding: 0, fontWeight: '600' },
   navBar: { display: 'flex', gap: '8px', marginBottom: '15px', alignItems: 'center', flexWrap: 'wrap' },
-  navBadge: { background: '#eee', padding: '6px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: '600' },
-  navBtn: { background: '#f5f5f5', border: '1px solid #ddd', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', cursor: 'pointer' },
-  navActive: { background: '#111', color: '#fff', border: '1px solid #111', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center' },
-  modalCard: { background: '#fff', padding: '25px', borderRadius: '8px', width: '320px', border: '1px solid #ddd' },
-  modalCardLarge: { background: '#fff', padding: '25px', borderRadius: '8px', width: '480px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid #ddd' },
-  modalActions: { display: 'flex', gap: '10px', marginTop: '15px', alignItems: 'center' },
-  monitor: { background: '#f9f9f9', border: '1px solid #eee', padding: '8px', fontSize: '12px', display: 'flex', justifyContent: 'space-between', marginBottom: '10px', borderRadius: '4px' },
-  promptBox: { background: '#f4f4f5', borderLeft: '3px solid #111', padding: '10px', fontSize: '12px', margin: '10px 0', borderRadius: '0 4px 4px 0' },
-  certBox: { border: '1px solid #ccc', padding: '20px', background: '#fff', borderRadius: '4px' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginTop: '10px' },
-  main: { marginTop: '10px' }
+  navBadge: { background: '#e2e8f0', padding: '8px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: '700', color: '#0f172a' },
+  navBtn: { background: '#f8fafc', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: '4px', fontSize: '13px', cursor: 'pointer', color: '#334155' },
+  navActive: { background: '#0f172a', color: '#fff', border: '1px solid #0f172a', padding: '8px 14px', borderRadius: '4px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' },
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 999 },
+  modalCard: { background: '#fff', padding: '25px', borderRadius: '8px', width: '340px', border: '1px solid #ddd', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' },
+  modalCardLarge: { background: '#fff', padding: '25px', borderRadius: '8px', width: '500px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid #ddd', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' },
+  modalActions: { display: 'flex', gap: '10px', marginTop: '20px', alignItems: 'center' },
+  monitor: { background: '#f8fafc', border: '1px solid #e2e8f0', padding: '10px', fontSize: '12px', display: 'flex', justifyContent: 'space-between', marginBottom: '15px', borderRadius: '4px' },
+  promptBox: { background: '#f8fafc', borderLeft: '4px solid #0f172a', padding: '12px', fontSize: '13px', margin: '15px 0', borderRadius: '0 4px 4px 0' },
+  certBox: { border: '1px solid #e5e5e5', padding: '30px', background: '#fff', borderRadius: '6px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginTop: '15px' },
+  main: { marginTop: '15px' }
 };
