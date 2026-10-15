@@ -12,16 +12,6 @@ const session = {
   clear: () => ['PENA_ROLE', 'PENA_TAB', 'PENA_CLASS', 'PENA_STUDENT', 'PENA_AI_KEY'].forEach(k => localStorage.removeItem(k))
 };
 
-// ==========================================
-// UTILS: Dipisah keluar biar Vercel nggak Error (Strict Mode ESLint)
-// ==========================================
-const getStorageKeys = (kelas, role) => {
-  if (role === 'mandiri') return { students: 'PENA_MDR_STU_ISO', submissions: 'PENA_MDR_SUB_ISO' };
-  if (!kelas) return { students: 'PENA_STU_DEF', submissions: 'PENA_SUB_DEF' };
-  const safeCode = kelas.classCode ? kelas.classCode : kelas.pin; 
-  return { students: `PENA_C_${safeCode}_STU`, submissions: `PENA_C_${safeCode}_SUB` };
-};
-
 export default function App() {
   const [userRole, setUserRole] = useState(() => session.get('PENA_ROLE', null)); 
   const [activeTab, setActiveTab] = useState(() => session.get('PENA_TAB', 'landing'));
@@ -29,7 +19,8 @@ export default function App() {
   const [currentStudent, setCurrentStudent] = useState(() => session.get('PENA_STUDENT', null));
   const [apiKey, setApiKey] = useState(() => session.get('PENA_AI_KEY', ''));
   
-  const [isApiValid, setIsApiValid] = useState(apiKey.length > 10);
+  // FIX: Pastikan isApiValid juga membaca session secara akurat saat web direfresh
+  const [isApiValid, setIsApiValid] = useState(() => session.get('PENA_AI_KEY', '').length > 10);
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
 
   useEffect(() => {
@@ -53,63 +44,57 @@ export default function App() {
   const [showMandiriModal, setShowMandiriModal] = useState(false);
   const [mandiriNameInput, setMandiriNameInput] = useState('');
 
+  // Perbaikan Sistem Storage Key (Menggunakan Class Code Unik)
+  const getStorageKeys = (kelas, role) => {
+    if (role === 'mandiri') return { students: 'PENA_MDR_STU_ISO', submissions: 'PENA_MDR_SUB_ISO' };
+    if (!kelas) return { students: 'PENA_STU_DEF', submissions: 'PENA_SUB_DEF' };
+    const safeCode = kelas.classCode ? kelas.classCode : kelas.pin; 
+    return { students: `PENA_C_${safeCode}_STU`, submissions: `PENA_C_${safeCode}_SUB` };
+  };
+
   const [students, setStudents] = useState([]);
   const [submissions, setSubmissions] = useState([]);
 
+  // FIX: Sinkronisasi Storage Lintas Tab Murni tanpa setInterval (Ringan & Cepat)
   useEffect(() => {
-    if (userRole === 'mandiri') {
-      const keys = getStorageKeys(null, 'mandiri');
-      const savedSub = localStorage.getItem(keys.submissions);
-      setSubmissions(savedSub ? JSON.parse(savedSub) : []);
-      return;
-    }
-    if (!currentClass) return;
-    
-    const keys = getStorageKeys(currentClass, userRole);
-    try {
-      const savedStudents = localStorage.getItem(keys.students);
-      if (savedStudents) { setStudents(JSON.parse(savedStudents)); } 
-      else if (userRole === 'guru') {
-        const defaultStudents = [{ id: 1, name: 'Siswa Contoh', pin: '1234' }];
-        setStudents(defaultStudents);
-        localStorage.setItem(keys.students, JSON.stringify(defaultStudents));
-      }
-      const savedSub = localStorage.getItem(keys.submissions);
-      setSubmissions(savedSub ? JSON.parse(savedSub) : []);
-    } catch (e) { console.error(e); }
-  }, [currentClass, userRole]);
-
-  // Polling Sinkronisasi yang aman dari amukan Vercel
-  useEffect(() => {
-    const interval = setInterval(() => {
-      try {
-        const keys = getStorageKeys(currentClass, userRole);
+    const loadClassData = () => {
+      if (userRole === 'mandiri') {
+        const keys = getStorageKeys(null, 'mandiri');
         const savedSub = localStorage.getItem(keys.submissions);
-        if (savedSub && JSON.stringify(submissions) !== savedSub) { setSubmissions(JSON.parse(savedSub)); }
-        
-        if (userRole !== 'mandiri' && currentClass) {
-          const savedStu = localStorage.getItem(keys.students);
-          if (savedStu && JSON.stringify(students) !== savedStu) { setStudents(JSON.parse(savedStu)); }
+        setSubmissions(savedSub ? JSON.parse(savedSub) : []);
+        return;
+      }
+      if (!currentClass) return;
+      
+      const keys = getStorageKeys(currentClass, userRole);
+      try {
+        const savedStudents = localStorage.getItem(keys.students);
+        if (savedStudents) { setStudents(JSON.parse(savedStudents)); } 
+        else if (userRole === 'guru') {
+          const defaultStudents = [{ id: 1, name: 'Siswa Contoh', pin: '1234' }];
+          setStudents(defaultStudents);
+          localStorage.setItem(keys.students, JSON.stringify(defaultStudents));
         }
-      } catch (err) {}
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [currentClass, userRole, submissions, students]);
+        const savedSub = localStorage.getItem(keys.submissions);
+        setSubmissions(savedSub ? JSON.parse(savedSub) : []);
+      } catch (e) { console.error(e); }
+    };
+
+    loadClassData();
+    window.addEventListener('storage', loadClassData);
+    return () => window.removeEventListener('storage', loadClassData);
+  }, [currentClass, userRole]);
 
   // Login Siswa
   const [classCodeInput, setClassCodeInput] = useState('');
   const [loginStudentName, setLoginStudentName] = useState('');
   const [loginStudentPin, setLoginStudentPin] = useState('');
-  const [resolvedStudentList, setResolvedStudentList] = useState([]);
 
   const handleVerifyClassCode = (e) => {
     e.preventDefault();
     const foundClass = allClasses.find(c => c.classCode === classCodeInput.trim() || c.pin === classCodeInput.trim());
     if (foundClass) {
       setCurrentClass(foundClass);
-      const keys = getStorageKeys(foundClass, 'siswa');
-      const savedStu = localStorage.getItem(keys.students);
-      setResolvedStudentList(savedStu ? JSON.parse(savedStu) : []);
       alert(`✅ Kelas ${foundClass.subject} (${foundClass.teacher}) ditemukan! Silakan masukkan nama dan PIN Anda.`);
     } else {
       alert('❌ Kode Akses Kelas tidak ditemukan. Pastikan Anda memasukkan 5 digit kode dengan benar.');
@@ -122,7 +107,12 @@ export default function App() {
     const inputName = loginStudentName.trim().toLowerCase();
     const inputPin = loginStudentPin.trim();
 
-    const student = resolvedStudentList.find(s => (s.name || '').trim().toLowerCase() === inputName && s.pin === inputPin);
+    // FIX: Ambil data fresh dari localStorage biar tahan Refresh Page!
+    const keys = getStorageKeys(currentClass, 'siswa');
+    const savedStu = localStorage.getItem(keys.students);
+    const freshStudentList = savedStu ? JSON.parse(savedStu) : [];
+
+    const student = freshStudentList.find(s => s.name.trim().toLowerCase() === inputName && s.pin === inputPin);
     if (student) {
       setCurrentStudent(student);
       setUserRole('siswa');
@@ -139,12 +129,11 @@ export default function App() {
     const pin = pinInput.trim();
     if (!tName || !sName || !pin) { alert('Semua kolom wajib diisi!'); return; }
     
-    let targetClass = allClasses.find(c => (c.teacher || '').toLowerCase() === tName.toLowerCase() && (c.subject || '').toLowerCase() === sName.toLowerCase());
+    let targetClass = allClasses.find(c => c.teacher.toLowerCase() === tName.toLowerCase() && c.subject.toLowerCase() === sName.toLowerCase());
     
     if (targetClass) {
       if (targetClass.pin !== pin) { alert('❌ Sandi (PIN) guru salah untuk akun ini!'); return; }
     } else {
-      // Generate 5 digit kode akses unik khusus buat siswa
       const classCode = Math.floor(10000 + Math.random() * 90000).toString();
       targetClass = { teacher: tName, subject: sName, pin: pin, classCode: classCode };
       const updated = [...allClasses, targetClass];
@@ -161,7 +150,10 @@ export default function App() {
 
   const handleDeleteClass = () => {
     if(window.confirm('🚨 PERINGATAN: Yakin mau hapus kelas ini beserta SELURUH data siswa dan tugasnya?')) {
-      const updatedClasses = allClasses.filter(c => (c.classCode || c.pin) !== (currentClass.classCode || currentClass.pin));
+      // FIX: Bandingkan berdasarkan ID spesifik, bukan referensi memori objek
+      const targetCode = currentClass.classCode || currentClass.pin;
+      const updatedClasses = allClasses.filter(c => (c.classCode || c.pin) !== targetCode);
+      
       setAllClasses(updatedClasses);
       localStorage.setItem('PENA_ALL_CLASSES', JSON.stringify(updatedClasses));
       
@@ -178,7 +170,7 @@ export default function App() {
     e.preventDefault();
     const name = mandiriNameInput.trim();
     if (!name) return;
-    setSubmissions([]); setStudents([]);
+    setSubmissions([]); setStudents([]); setCurrentClass(null);
     setCurrentStudent({ id: 'mandiri-' + Date.now(), name });
     setUserRole('mandiri'); setShowMandiriModal(false); setActiveTab('introSiswa');
   };
@@ -190,7 +182,6 @@ export default function App() {
     setActiveTab('landing'); setClassCodeInput('');
   };
 
-  // KANVAS NALAR
   const [isPasted, setIsPasted] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [formData, setFormData] = useState({ naskahText: '', deconstructionText: '' });
@@ -215,7 +206,6 @@ export default function App() {
     setActiveTab('workspace');
   };
 
-  // MESIN AI (Evaluasi 9 Indikator Sekaligus)
   const handleSubmitCanvas = async (e) => {
     e.preventDefault();
     if (!isApiValid) { alert('Masukkan API Key terlebih dahulu di tab 2.'); return; }
@@ -244,9 +234,14 @@ export default function App() {
         
         const data = await res.json();
         if (data.error) throw new Error(data.error.message);
-        diagnosis = `[HASIL EVALUASI AI] ${data.candidates[0].content.parts[0].text}`;
+        // FIX: Cek keamanan jika Gemini melempar safety block atau memutus respons
+        if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+          diagnosis = `[HASIL EVALUASI AI] ${data.candidates[0].content.parts[0].text}`;
+        } else {
+          diagnosis = `[ERROR AI] Mesin gagal menyimpulkan argumen. Mungkin terdapat kalimat yang melanggar standar komunitas API.`;
+        }
       } catch (err) {
-        diagnosis = `[ERROR AI] Gagal menghubungi server Gemini: ${err.message}. Pastikan API Key valid atau limit harian tidak habis.`;
+        diagnosis = `[ERROR AI] Gagal menghubungi server Gemini: ${err.message}. Pastikan API Key valid.`;
       }
     }
 
@@ -303,7 +298,7 @@ export default function App() {
         @media print { 
           body * { visibility: hidden; } 
           .print-area, .print-area * { visibility: visible; } 
-          .print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 15mm; background: white !important; } 
+          .print-area { position: absolute; left: 0; top: 0; width: 100vw; padding: 0; margin: 0; background: white !important; } 
           .no-print { display: none !important; } 
         }
       `}} />
@@ -360,10 +355,10 @@ export default function App() {
                 📚 Kelas: <b>{currentClass.subject}</b> ({currentClass.teacher})
               </div>
               <label>Ketik Nama Lengkap Anda:</label>
-              <input type="text" placeholder="Sesuai pendaftaran guru..." value={loginStudentName} onChange={(e) => setLoginStudentName(e.target.value)} style={styles.input} required autoComplete="off" />
+              <input type="text" placeholder="Sesuai pendaftaran guru..." value={loginStudentName} onChange={(e) => setLoginStudentName(e.target.value)} style={styles.input} required />
               
               <label>PIN Akses Siswa (4 Digit):</label>
-              <input type="password" placeholder="Masukkan PIN..." value={loginStudentPin} onChange={(e) => setLoginStudentPin(e.target.value)} style={styles.input} required autoComplete="new-password" />
+              <input type="password" placeholder="Masukkan PIN..." value={loginStudentPin} onChange={(e) => setLoginStudentPin(e.target.value)} style={styles.input} required />
               
               <div style={styles.modalActions}>
                 <button type="submit" style={styles.btnPrimary}>Masuk Kelas</button>
@@ -382,11 +377,11 @@ export default function App() {
             <p style={{fontSize: '12px', color: '#666'}}>Buat kelas baru atau login ke kelas yang sudah ada.</p>
             <form onSubmit={handleRegisterOrLoginGuru}>
               <label>Nama Guru:</label>
-              <input type="text" placeholder="Contoh: Pak Ahmad" value={teacherNameInput} onChange={(e) => setTeacherNameInput(e.target.value)} style={styles.input} required autoComplete="off" />
+              <input type="text" placeholder="Contoh: Pak Ahmad" value={teacherNameInput} onChange={(e) => setTeacherNameInput(e.target.value)} style={styles.input} required />
               <label>Mata Pelajaran:</label>
-              <input type="text" placeholder="Contoh: Sosiologi" value={subjectInput} onChange={(e) => setSubjectInput(e.target.value)} style={styles.input} required autoComplete="off" />
+              <input type="text" placeholder="Contoh: Sosiologi" value={subjectInput} onChange={(e) => setSubjectInput(e.target.value)} style={styles.input} required />
               <label>Sandi (PIN) Pengaman Guru:</label>
-              <input type="password" placeholder="Contoh: 1111" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} required autoComplete="new-password" />
+              <input type="password" placeholder="Contoh: 1111" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} required />
               <div style={styles.modalActions}>
                 <button type="submit" style={styles.btnPrimary}>Akses Ruang</button>
                 <button type="button" style={styles.textBtn} onClick={() => setShowPinModal(false)}>Batal</button>
@@ -403,7 +398,7 @@ export default function App() {
             <h3>Mode Mandiri</h3>
             <form onSubmit={handleMandiriLogin}>
               <label>Nama Pengguna:</label>
-              <input type="text" placeholder="Masukkan nama..." value={mandiriNameInput} onChange={(e) => setMandiriNameInput(e.target.value)} style={styles.input} required autoComplete="off" />
+              <input type="text" placeholder="Masukkan nama..." value={mandiriNameInput} onChange={(e) => setMandiriNameInput(e.target.value)} style={styles.input} required />
               <div style={styles.modalActions}>
                 <button type="submit" style={styles.btnPrimary}>Mulai Ujian</button>
                 <button type="button" style={styles.textBtn} onClick={() => setShowMandiriModal(false)}>Batal</button>
@@ -427,7 +422,7 @@ export default function App() {
           )}
           {userRole === 'guru' && (
             <>
-              <span style={styles.navBadge}>{currentClass?.subject} (Kode Murid: {currentClass?.classCode})</span>
+              <span style={styles.navBadge}>{currentClass?.subject} (Kode Akses Murid: {currentClass?.classCode})</span>
               <button style={activeTab === 'guruDashboard' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruDashboard')}>Evaluasi</button>
               <button style={activeTab === 'guruSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruSiswa')}>Daftar Siswa</button>
             </>
@@ -471,7 +466,7 @@ export default function App() {
 
                 <form onSubmit={checkApiValidity} style={{marginTop: '15px'}}>
                   <label style={{fontSize: '13px', fontWeight: 'bold'}}>Kunci Akses Gemini:</label>
-                  <input type="password" autoComplete="new-password" placeholder="AIzaSy..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{...styles.input, marginTop: '5px'}} required />
+                  <input type="password" autoComplete="off" placeholder="AIzaSy..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{...styles.input, marginTop: '5px'}} required />
                   <div style={{display: 'flex', gap: '10px', marginTop: '10px'}}>
                     <button type="submit" style={styles.btnPrimary}>Hubungkan Mesin</button>
                     {isApiValid && <button type="button" style={styles.btnSecondary} onClick={() => { setApiKey(''); setIsApiValid(false); }}>Hapus Key Lokal</button>}
@@ -547,9 +542,8 @@ export default function App() {
                     <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
                     <p><b>Nama Siswa:</b> {activePortfolio.studentName}</p>
                     <p><b>Status Tugas:</b> <span style={{padding: '3px 8px', background: '#eee', borderRadius: '4px'}}>{activePortfolio.status}</span></p>
-                    <p><b>Metode:</b> Analisis Terpadu 9 Aspek (Ennis & Polya)</p>
                     <p><b>Kutipan Naskah:</b><br/> "{activePortfolio.naskahText}"</p>
-                    <p><b>Resolusi & Dekonstruksi Terpadu:</b><br/> "{activePortfolio.deconstructionText}"</p>
+                    <p><b>Resolusi & Dekonstruksi Terpadu (Ennis & Polya):</b><br/> "{activePortfolio.deconstructionText}"</p>
                     <div style={{background: '#f9f9f9', padding: '10px', borderLeft: '3px solid #111', marginTop: '15px'}}>
                       <p style={{margin: 0, lineHeight: '1.5'}}><b>🤖 Diagnosis Evaluasi AI:</b><br/>{activePortfolio.diagnosis}</p>
                     </div>
@@ -571,7 +565,7 @@ export default function App() {
               <div className={activeTab === 'guruDashboard' ? "print-area" : ""}>
                 <div style={styles.card}>
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px'}}>
-                    <h2 style={{margin: 0}}>Rekapitulasi Evaluasi ({currentClass?.subject})</h2>
+                    <h2 style={{margin: 0}}>Rekapitulasi Evaluasi Kelas ({currentClass?.subject})</h2>
                     <div className="no-print" style={{display: 'flex', gap: '8px'}}>
                       <button style={styles.btnSecondary} onClick={() => window.print()}>🖨️ Cetak Laporan</button>
                       <button style={styles.btnDangerSmall} onClick={handleDeleteClass}>Hapus Kelas</button>
@@ -639,7 +633,6 @@ export default function App() {
                   <div style={{fontSize: '13px', background: '#f9f9f9', padding: '15px', borderRadius: '6px', margin: '10px 0', maxHeight: '280px', overflowY: 'auto', border: '1px solid #e5e5e5'}}>
                     <p style={{margin: '0 0 5px 0'}}><b>👤 Nama Siswa:</b> {selectedSubmission.studentName}</p>
                     <p style={{margin: '0 0 10px 0'}}><b>🕒 Waktu Submit:</b> {selectedSubmission.timestamp}</p>
-                    <p style={{margin: '0 0 10px 0'}}><b>📌 Indikator:</b> Analisis Terpadu 9 Aspek (Ennis & Polya)</p>
                     <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
                     <p><b>Kutipan Naskah:</b> <br/><i>"{selectedSubmission.naskahText}"</i></p>
                     <p><b>Uraian Dekonstruksi Terpadu:</b> <br/>"{selectedSubmission.deconstructionText}"</p>
