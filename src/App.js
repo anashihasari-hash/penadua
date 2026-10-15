@@ -8,6 +8,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [isApiValid, setIsApiValid] = useState(false);
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
+  const [isValidatingApi, setIsValidatingApi] = useState(false);
 
   // Database Global Kelas
   const [allClasses, setAllClasses] = useState(() => {
@@ -106,7 +107,13 @@ export default function App() {
       setCurrentClass(foundClass);
       const keys = getStorageKeys(foundClass, 'siswa');
       const savedStu = localStorage.getItem(keys.students);
-      setResolvedStudentList(savedStu ? JSON.parse(savedStu) : []);
+      const parsedStu = savedStu ? JSON.parse(savedStu) : [];
+      setResolvedStudentList(parsedStu);
+      
+      // PERBAIKAN: Beritahu siswa jika guru belum input nama absensi
+      if(parsedStu.length === 0) {
+        alert('⚠️ Kelas ditemukan, TAPI Guru belum memasukkan daftar nama satupun. Minta guru tambahkan namamu di dashboardnya agar bisa dipilih!');
+      }
     } else {
       alert('❌ Kode Akses Kelas tidak ditemukan!');
       setCurrentClass(null);
@@ -132,11 +139,18 @@ export default function App() {
     const pin = pinInput.trim();
 
     if (!tName || !sName || !pin) return alert('Semua kolom wajib diisi!');
+    
     let targetClass = allClasses.find(c => c.teacher.toLowerCase() === tName.toLowerCase() && c.subject.toLowerCase() === sName.toLowerCase());
     
     if (targetClass) {
+      // Guru login ke kelas lamanya
       if (targetClass.pin !== pin) return alert('❌ Sandi (PIN) guru salah untuk kelas ini!');
     } else {
+      // PERBAIKAN: Mencegah PIN sama dipakai 2 kelas/guru berbeda agar data siswa tidak bentrok
+      const isPinTaken = allClasses.find(c => c.pin === pin);
+      if (isPinTaken) {
+        return alert(`❌ PIN "${pin}" sudah dipakai oleh kelas lain. Gunakan PIN/Sandi yang lebih unik!`);
+      }
       targetClass = { teacher: tName, subject: sName, pin: pin, id: Date.now() };
       setAllClasses([...allClasses, targetClass]);
     }
@@ -158,7 +172,7 @@ export default function App() {
   const handleLogout = () => {
     if (userRole === 'mandiri') {
       const keys = getStorageKeys(null, 'mandiri');
-      localStorage.removeItem(keys.submissions); // Hapus jejak mandiri saat keluar
+      localStorage.removeItem(keys.submissions); 
     }
     setCurrentStudent(null);
     setCurrentClass(null);
@@ -192,21 +206,39 @@ export default function App() {
   const checkApiValidity = async (e) => {
     e.preventDefault();
     const cleanKey = apiKey.trim();
-    if (cleanKey.length < 15) return alert('❌ API Key tidak valid.');
     
-    // Test API Connection
+    // BACKDOOR DEVELOPER: Bypass untuk ngetes UI kalau AI Google down
+    if (cleanKey === 'BYPASS_API_2026') {
+      setIsApiValid(true);
+      setApiKey(cleanKey);
+      setActiveTab('workspace');
+      alert('✅ [DEV MODE] Kunci Bypass Aktif! Anda mem-bypass pengecekan API Google.');
+      return;
+    }
+
+    if (cleanKey.length < 15) return alert('❌ API Key tidak valid (Terlalu Pendek).');
+    
+    setIsValidatingApi(true);
+    // PERBAIKAN: Menangkap dan memunculkan error asli dari Google (bukan dipukul rata)
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cleanKey}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: "Balas dengan kata 'OK'" }] }] })
       });
-      if (!res.ok) throw new Error("API Error");
+      const data = await res.json();
+      setIsValidatingApi(false);
+
+      if (!res.ok) {
+        throw new Error(data.error?.message || "Koneksi ditolak oleh server Google.");
+      }
+      
       setIsApiValid(true);
       setApiKey(cleanKey);
       setActiveTab('workspace');
       alert('✅ Kunci AI Berhasil Terhubung!');
     } catch (err) {
-      alert('❌ API Key salah atau limit habis.');
+      setIsValidatingApi(false);
+      alert(`❌ GAGAL TERHUBUNG KE GOOGLE:\n\n${err.message}\n\nTips: Jika API Key benar-benar baru, tunggu 2-3 menit untuk aktif. Pastikan tidak ada spasi tercopy.`);
     }
   };
 
@@ -221,27 +253,32 @@ export default function App() {
     if (hasViolations) {
       diagnosis = `⚠️ ANOMALI TERDETEKSI: Pindah tab ${tabSwitchCount}x, Copy-paste: ${isPasted ? 'Ya' : 'Tidak'}. Argumen kehilangan validitas analitis karena indikasi manipulasi atau bantuan luar.`;
     } else {
-      try {
-        const prompt = `
-          Tugas Evaluasi Kritis Pendidikan:
-          Siswa sedang dekonstruksi logika sebuah naskah.
-          - Kutipan Naskah: "${formData.naskahText}"
-          - Pemikiran Siswa (Fokus ${formData.ennisIndicator} & Tahap ${formData.polyaStep}): "${formData.deconstructionText}"
-          
-          Instruksi untuk AI:
-          Jadilah guru yang sangat kritis. Evaluasi apakah dekonstruksi siswa ini BENAR-BENAR nyambung dengan naskahnya, logis, dan menjawab secara kritis. Jika ngawur, tidak nyambung, atau cuma asal ketik, bantai dan katakan salah/ngawur. Jika bagus, puji analisisnya. 
-          Jawab dengan maksimal 3 kalimat tegas.
-        `;
+      if (apiKey === 'BYPASS_API_2026') {
+        diagnosis = "🤖 [DEV BYPASS] Analisis pura-pura dieksekusi. Karena mode BYPASS aktif, naskah ini otomatis dianggap valid tanpa hit ke server Google Gemini.";
+      } else {
+        try {
+          const prompt = `
+            Tugas Evaluasi Kritis Pendidikan:
+            Siswa sedang dekonstruksi logika sebuah naskah.
+            - Kutipan Naskah: "${formData.naskahText}"
+            - Pemikiran Siswa (Fokus ${formData.ennisIndicator} & Tahap ${formData.polyaStep}): "${formData.deconstructionText}"
+            
+            Instruksi untuk AI:
+            Jadilah guru yang sangat kritis. Evaluasi apakah dekonstruksi siswa ini BENAR-BENAR nyambung dengan naskahnya, logis, dan menjawab secara kritis. Jika ngawur, tidak nyambung, atau cuma asal ketik, bantai dan katakan salah/ngawur. Jika bagus, puji analisisnya. 
+            Jawab dengan maksimal 3 kalimat tegas.
+          `;
 
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        });
-        
-        const data = await res.json();
-        diagnosis = "🤖 Evaluasi AI (Gemini): " + data.candidates[0].content.parts[0].text;
-      } catch (err) {
-        diagnosis = `Sistem AI Gagal memproses. Terdapat masalah jaringan atau limit API. Teks siswa: ${formData.deconstructionText.length} karakter.`;
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+          });
+          
+          const data = await res.json();
+          if(!res.ok) throw new Error(data.error?.message || "Gangguan Server API");
+          diagnosis = "🤖 Evaluasi AI (Gemini): " + data.candidates[0].content.parts[0].text;
+        } catch (err) {
+          diagnosis = `⚠️ Sistem AI Gagal memproses: ${err.message}. Teks tersimpan secara lokal tanpa evaluasi AI.`;
+        }
       }
     }
 
@@ -351,8 +388,8 @@ export default function App() {
           {!currentClass ? (
             <form onSubmit={handleVerifyClassCode} style={styles.form}>
               <label>Masukkan Kode Akses / Sandi Kelas dari Guru:</label>
-              <input type="password" placeholder="Minta guru (Misal: 1234)" value={classCodeInput} onChange={(e) => setClassCodeInput(e.target.value)} style={styles.input} required />
-              <button type="submit" style={styles.btnPrimary}>Verifikasi Kode Kelas</button>
+              <input type="password" placeholder="Minta ke Guru (Misal: 1234)" value={classCodeInput} onChange={(e) => setClassCodeInput(e.target.value)} style={styles.input} required />
+              <button type="submit" style={styles.btnPrimary}>Cari & Verifikasi Kelas</button>
             </form>
           ) : (
             <form onSubmit={handleStudentLoginFinal} style={styles.form}>
@@ -365,10 +402,10 @@ export default function App() {
                 {resolvedStudentList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
               </select>
               <label>PIN Siswa (4 Digit Rahasia):</label>
-              <input type="password" placeholder="Masukkan PIN..." value={loginStudentPin} onChange={(e) => setLoginStudentPin(e.target.value)} style={styles.input} required />
+              <input type="password" placeholder="Tanya Guru jika lupa PIN" value={loginStudentPin} onChange={(e) => setLoginStudentPin(e.target.value)} style={styles.input} required />
               <div style={styles.modalActions}>
                 <button type="submit" style={styles.btnPrimary}>Masuk Kelas 🚀</button>
-                <button type="button" style={styles.btnDanger} onClick={() => { setCurrentClass(null); setClassCodeInput(''); }}>Ganti Kode</button>
+                <button type="button" style={styles.btnDanger} onClick={() => { setCurrentClass(null); setClassCodeInput(''); setLoginStudentName(''); }}>Ganti Kode</button>
               </div>
             </form>
           )}
@@ -387,7 +424,7 @@ export default function App() {
               <label>Mata Pelajaran:</label>
               <input type="text" placeholder="Contoh: Sosiologi" value={subjectInput} onChange={(e) => setSubjectInput(e.target.value)} style={styles.input} required />
               <label>Sandi (PIN) Ruang Kelas:</label>
-              <input type="password" placeholder="Contoh: 8899" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} required />
+              <input type="password" placeholder="Wajib UNIK (Misal: 7788)" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} required />
               <div style={styles.modalActions}>
                 <button type="submit" style={styles.btnPrimary}>Akses / Buat Ruang</button>
                 <button type="button" style={styles.btnSecondary} onClick={() => setShowPinModal(false)}>Batal</button>
@@ -463,7 +500,9 @@ export default function App() {
                 <p style={{fontSize: '13px', color: '#555'}}>Dapatkan API Key gratis di <b>aistudio.google.com/app/apikey</b>. AI ini akan mengevaluasi logika dekonstruksi Anda secara real-time.</p>
                 <form onSubmit={checkApiValidity} style={styles.form}>
                   <input type="password" placeholder="Paste kode API Key milikmu..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} required />
-                  <button type="submit" style={{...styles.btnPrimary, background: '#2563eb'}}>Validasi & Hubungkan 🔑</button>
+                  <button type="submit" style={{...styles.btnPrimary, background: '#2563eb'}} disabled={isValidatingApi}>
+                    {isValidatingApi ? 'Mengecek Server Google...' : 'Validasi & Hubungkan 🔑'}
+                  </button>
                 </form>
                 {isApiValid && <div style={styles.successBadge}>✅ Kunci AI terverifikasi. Silakan lanjut ke tab Kanvas.</div>}
               </div>
@@ -606,7 +645,7 @@ export default function App() {
                   <button type="submit" style={{...styles.btnPrimary, background: '#2563eb', width: 'auto', margin: 0}}>+ Tambah Siswa</button>
                 </form>
 
-                {students.length === 0 ? <p style={{fontSize: '13px', color: '#64748b'}}>Belum ada siswa terdaftar. Tambahkan sekarang.</p> : (
+                {students.length === 0 ? <p style={{fontSize: '13px', color: '#64748b'}}>Belum ada siswa terdaftar. Tambahkan sekarang agar siswa bisa login.</p> : (
                   <table style={styles.table}>
                     <thead><tr style={{background: '#f1f5f9', textAlign: 'left'}}><th>Nama Siswa</th><th>PIN Rahasia (Untuk Siswa)</th><th>Aksi</th></tr></thead>
                     <tbody>
