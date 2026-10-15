@@ -7,6 +7,19 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
 
+  // Identitas Guru & Mapel (Poin 2)
+  const [teacherProfile, setTeacherProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem('PENA_TEACHER_PROFILE');
+      return saved ? JSON.parse(saved) : { name: 'Dr. Ahmad, M.Pd.', subject: 'Bahasa Indonesia / Kritis' };
+    } catch (e) {
+      return { name: 'Dr. Ahmad, M.Pd.', subject: 'Bahasa Indonesia / Kritis' };
+    }
+  });
+  const [tempTeacherName, setTempTeacherName] = useState('');
+  const [tempTeacherSubject, setTempTeacherSubject] = useState('');
+  const [showTeacherSetupModal, setShowTeacherSetupModal] = useState(false);
+
   const [activeTab, setActiveTab] = useState('landing');
   const [apiKey, setApiKey] = useState('');
   const [selectedMode, setSelectedMode] = useState('mandiri');
@@ -17,7 +30,10 @@ export default function App() {
       const saved = localStorage.getItem('PENA_STUDENTS');
       if (saved) {
         const parsed = JSON.parse(saved);
-        return Array.isArray(parsed) ? parsed : [];
+        return Array.isArray(parsed) && parsed.length > 0 ? parsed : [
+          { id: 1, name: 'Budi Santoso', pin: '1234' },
+          { id: 2, name: 'Siti Rahma', pin: '5678' }
+        ];
       }
     } catch (e) { console.error(e); }
     return [
@@ -58,7 +74,7 @@ export default function App() {
     'Memeriksa Kembali': 'Jika ada pihak yang menentang kesimpulanmu, bagaimana pembelaanmu?'
   };
 
-  // --- 5. DATABASE SUBMISI (DENGAN INTERVAL POLLING SUPAYA HP CEPAT UPDATE) ---
+  // --- 5. DATABASE SUBMISI ---
   const [submissions, setSubmissions] = useState(() => {
     try {
       const saved = localStorage.getItem('PENA_SUBMISSIONS');
@@ -71,34 +87,25 @@ export default function App() {
   });
   const [activeSubmissionId, setActiveSubmissionId] = useState(null);
 
-  // Polling & Cross-Tab Sync agar HP Android/iPhone update real-time
+  // Sinkronisasi Real-Time (Mengatasi delay di iOS / Android)
   useEffect(() => {
     const interval = setInterval(() => {
       try {
         const savedSub = localStorage.getItem('PENA_SUBMISSIONS');
         if (savedSub) {
           const parsedSub = JSON.parse(savedSub);
-          if (Array.isArray(parsedSub)) {
-            setSubmissions(parsedSub);
-          }
+          if (Array.isArray(parsedSub)) setSubmissions(parsedSub);
         }
-        const savedStu = localStorage.getItem('PENA_STUDENTS');
-        if (savedStu) {
-          const parsedStu = JSON.parse(savedStu);
-          if (Array.isArray(parsedStu)) {
-            setStudents(parsedStu);
-          }
-        }
-      } catch (err) { console.error("Polling sync error", err); }
-    }, 1500); // Cek perubahan tiap 1.5 detik
-
+      } catch (err) { console.error(err); }
+    }, 1000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
     localStorage.setItem('PENA_SUBMISSIONS', JSON.stringify(submissions));
     localStorage.setItem('PENA_STUDENTS', JSON.stringify(students));
-  }, [submissions, students]);
+    localStorage.setItem('PENA_TEACHER_PROFILE', JSON.stringify(teacherProfile));
+  }, [submissions, students, teacherProfile]);
 
   useEffect(() => {
     if (activeTab !== 'workspace' || userRole !== 'siswa' || !currentStudent) return;
@@ -115,7 +122,7 @@ export default function App() {
 
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
-  const [showAccModal, setShowAccModal] = useState(false); // Modal Catatan ACC Kustom (Poin 2)
+  const [showAccModal, setShowAccModal] = useState(false);
   const [targetSubmissionId, setTargetSubmissionId] = useState(null);
   const [teacherNoteInput, setTeacherNoteInput] = useState('');
 
@@ -123,15 +130,26 @@ export default function App() {
   const handleVerifyPinGuru = (e) => {
     e.preventDefault();
     if (pinInput === 'PENA2026' || pinInput === '1234') {
-      setIsGuruAuthed(true);
-      setUserRole('guru');
       setShowPinModal(false);
       setPinInput('');
-      setActiveTab('guruDashboard');
+      // Buka modal setup identitas guru terlebih dahulu (Poin 2)
+      setTempTeacherName(teacherProfile.name);
+      setTempTeacherSubject(teacherProfile.subject);
+      setShowTeacherSetupModal(true);
     } else {
       alert('❌ PIN Guru Salah!');
       setPinInput('');
     }
+  };
+
+  const handleSaveTeacherProfile = (e) => {
+    e.preventDefault();
+    const updated = { name: tempTeacherName, subject: tempTeacherSubject };
+    setTeacherProfile(updated);
+    setIsGuruAuthed(true);
+    setUserRole('guru');
+    setShowTeacherSetupModal(false);
+    setActiveTab('guruDashboard');
   };
 
   const handleStudentLogin = (e) => {
@@ -195,6 +213,8 @@ export default function App() {
       id: newId,
       certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}`,
       studentName: currentStudent?.name || 'Siswa',
+      teacherName: teacherProfile.name,
+      subjectName: teacherProfile.subject,
       mode: selectedMode === 'mandiri' ? 'Modus Mandiri (Privat)' : 'Modus Kelompok (Tugas Kelas)',
       naskahText: formData.naskahText,
       ennis: formData.ennisIndicator,
@@ -216,7 +236,17 @@ export default function App() {
     setActiveTab('portfolio');
   };
 
-  // POIN 1: Hapus Jejak & Reset Total Bersih
+  // POIN 1: SIMPAN DATA (DOWNLOAD JSON) DAN HAPUS BERSIH UNTUK PIHAK LAIN
+  const handleDownloadBackupData = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(submissions, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `Rekap_Tugas_PENA_${new Date().toISOString().slice(0,10)}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
   const handleClearMyDataAndLogout = () => {
     const confirmClear = window.confirm("PENTING: Apakah kamu SUDAH MENCETAK/MENGUNDUH PDF Sertifikatmu?\n\nJika klik OK, datamu akan dihapus total dari perangkat ini.");
     if (confirmClear) {
@@ -227,21 +257,21 @@ export default function App() {
     }
   };
 
-  const handleResetEntireSystem = () => {
-    const confirmReset = window.confirm("⚠️ PERINGATAN KERAS:\nTindakan ini akan menghapus SELURUH database lokal (data siswa, roster, dan tugas di dashboard) hingga bersih total seperti baru!\n\nLanjutkan?");
+  const handleBackupAndResetSystem = () => {
+    if (submissions.length > 0) {
+      const wantBackup = window.confirm("Apakah Anda ingin MENGUNDUH (SIMPAN) rekap data tugas siswa terlebih dahulu sebelum sistem dibersihkan?");
+      if (wantBackup) {
+        handleDownloadBackupData();
+      }
+    }
+    const confirmReset = window.confirm("⚠️ PERINGATAN: Semua data tugas di dashboard akan dihapus bersih agar siap digunakan oleh guru / pihak sekolah lain. Lanjutkan?");
     if (confirmReset) {
-      localStorage.clear();
+      localStorage.removeItem('PENA_SUBMISSIONS');
       setSubmissions([]);
-      setStudents([
-        { id: 1, name: 'Budi Santoso', pin: '1234' },
-        { id: 2, name: 'Siti Rahma', pin: '5678' }
-      ]);
-      handleLogout();
-      alert("🗑️ Sistem berhasil di-reset total ke setelan awal pabrik. Aman untuk diserahkan ke pihak/sekolah lain!");
+      alert("🗑️ Dashboard berhasil dibersihkan total dan siap digunakan untuk sesi atau pihak lain!");
     }
   };
 
-  // POIN 2: ACC DENGAN CATATAN KUSTOM GURU
   const handleOpenAccModal = (id) => {
     setTargetSubmissionId(id);
     setTeacherNoteInput('Bagus! Pertanggungjawaban nalar logis dan memenuhi kaidah berpikir kritis.');
@@ -255,7 +285,7 @@ export default function App() {
       setSelectedSubmission(prev => ({ ...prev, status: 'Disetujui Guru (ACC)', teacherFeedback: teacherNoteInput }));
     }
     setShowAccModal(false);
-    alert("✅ Tugas berhasil di-ACC beserta catatan kustom Anda!");
+    alert("✅ Tugas berhasil di-ACC!");
   };
 
   const handleSaveRevision = (e) => {
@@ -265,29 +295,18 @@ export default function App() {
       setSelectedSubmission(prev => ({ ...prev, status: 'Minta Revisi', teacherFeedback: teacherNoteInput }));
     }
     setShowRevisionModal(false);
-    alert("❌ Status diubah menjadi Minta Revisi & Catatan terkirim.");
+    alert("❌ Status diubah menjadi Minta Revisi.");
   };
 
   return (
     <div style={styles.appContainer}>
-      {/* POIN 3: CSS PRINT PORTRAIT A4 / F4 PRESISI TEPAT 1 HALAMAN */}
       <style dangerouslySetInnerHTML={{ __html: `
-        @page {
-          size: A4 portrait;
-          margin: 10mm;
-        }
+        @page { size: A4 portrait; margin: 10mm; }
         @media print {
           body * { visibility: hidden; }
           #certPrintArea, #certPrintArea * { visibility: visible; }
           #certPrintArea { 
-            position: fixed; 
-            left: 0; 
-            top: 0; 
-            width: 100vw; 
-            height: 100vh; 
-            padding: 5mm; 
-            box-sizing: border-box; 
-            background: white !important;
+            position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; padding: 5mm; box-sizing: border-box; background: white !important;
           }
           .no-print { display: none !important; }
         }
@@ -295,7 +314,10 @@ export default function App() {
 
       {/* HEADER GLOBAL */}
       <header style={styles.header} className="no-print">
-        <h2 style={styles.logoText}>PENA 🛡️</h2>
+        <div>
+          <h2 style={styles.logoText}>PENA 🛡️</h2>
+          <span style={{fontSize: '10px', color: '#94a3b8'}}>v2.6 (iOS Safe & Multi-User)</span>
+        </div>
         {userRole && (
           <button style={styles.cancelBtn} onClick={handleLogout}>🚪 Keluar Sistem</button>
         )}
@@ -314,12 +336,12 @@ export default function App() {
           <div style={{display: 'flex', gap: '20px', marginTop: '20px', flexWrap: 'wrap'}}>
             <div style={styles.roleCard} onClick={() => setActiveTab('loginSiswa')}>
               <h3 style={{margin: '0 0 10px 0'}}>🎓 Akses Siswa</h3>
-              <p style={{fontSize: '13px', color: '#475569'}}>Masuk menggunakan PIN yang diberikan oleh Guru.</p>
+              <p style={{fontSize: '13px', color: '#475569'}}>Masuk menggunakan PIN dari Guru.</p>
               <button style={{...styles.primaryBtn, marginTop: '15px'}}>Masuk sebagai Siswa</button>
             </div>
             <div style={styles.roleCard} onClick={() => setShowPinModal(true)}>
-              <h3 style={{margin: '0 0 10px 0'}}>👨‍🏫 Akses Guru</h3>
-              <p style={{fontSize: '13px', color: '#475569'}}>Masuk dengan PIN Admin untuk kelola kelas & evaluasi.</p>
+              <h3 style={{margin: '0 0 10px 0'}}>👨‍🏫 Akses Guru / Pengajar</h3>
+              <p style={{fontSize: '13px', color: '#475569'}}>Atur identitas kelas dan evaluasi tugas.</p>
               <button style={{...styles.guruActiveBtn, width: '100%', marginTop: '15px'}}>Masuk Dashboard Guru</button>
             </div>
           </div>
@@ -352,13 +374,34 @@ export default function App() {
       {showPinModal && (
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard}>
-            <h3>🔐 Otentikasi Khusus Guru</h3>
+            <h3>🔐 Otentikasi Guru</h3>
             <form onSubmit={handleVerifyPinGuru}>
               <input type="password" placeholder="PIN Demo: PENA2026" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} autoFocus required />
               <div style={{display: 'flex', gap: '10px'}}>
-                <button type="submit" style={styles.primaryBtn}>Masuk 🔑</button>
+                <button type="submit" style={styles.primaryBtn}>Lanjut ➔</button>
                 <button type="button" style={styles.cancelBtn} onClick={() => {setShowPinModal(false); setActiveTab('landing');}}>Batal</button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SETUP NAMA GURU & MAPEL (Poin 2) */}
+      {showTeacherSetupModal && (
+        <div style={styles.modalOverlay} className="no-print">
+          <div style={styles.modalCard}>
+            <h3>⚙️ Identitas Pengajar & Mata Pelajaran</h3>
+            <p style={{fontSize: '12px', color: '#64748b'}}>Nama dan mapel ini akan otomatis tercantum di sertifikat seluruh siswa.</p>
+            <form onSubmit={handleSaveTeacherProfile}>
+              <div style={styles.formGroup}>
+                <label style={{fontSize: '13px', fontWeight: 'bold'}}>Nama Guru / Pengajar:</label>
+                <input type="text" value={tempTeacherName} onChange={(e) => setTempTeacherName(e.target.value)} placeholder="Contoh: Budi Santoso, S.Pd." style={styles.input} required />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={{fontSize: '13px', fontWeight: 'bold'}}>Mata Pelajaran / Sesi:</label>
+                <input type="text" value={tempTeacherSubject} onChange={(e) => setTempTeacherSubject(e.target.value)} placeholder="Contoh: Bahasa Indonesia Kelas 12" style={styles.input} required />
+              </div>
+              <button type="submit" style={styles.primaryBtn}>Masuk Dashboard 🚀</button>
             </form>
           </div>
         </div>
@@ -393,12 +436,12 @@ export default function App() {
               <div style={styles.card} className="no-print">
                 <h2 style={{color: '#0f172a'}}>Halo, {currentStudent.name}! 👋</h2>
                 <div style={styles.introBox}>
-                  <h4>Tahapan Pengerjaan:</h4>
+                  <h4>Pengajar Sesi Ini: <b>{teacherProfile.name}</b> ({teacherProfile.subject})</h4>
                   <ol style={{lineHeight: '1.6', marginTop: '10px'}}>
-                    <li><b>Siapkan Naskah (Pilar 1):</b> Tulis opini/karya tulismu secara manual.</li>
-                    <li><b>Hubungkan AI (Tab 2):</b> Masukkan API Key Google AI.</li>
-                    <li><b>Uji Nalar (Tab 3):</b> Dekonstruksi logikanya. Hati-hati, sistem mengawasi perpindahan tab!</li>
-                    <li><b>Portofolio (Tab 4):</b> Cetak PDF sertifikatmu.</li>
+                    <li><b>Siapkan Naskah:</b> Tulis opini/karya tulismu secara manual.</li>
+                    <li><b>Hubungkan AI:</b> Masukkan API Key Google AI.</li>
+                    <li><b>Uji Nalar:</b> Dekonstruksi logikanya. Hati-hati, sistem mengawasi perpindahan tab!</li>
+                    <li><b>Portofolio:</b> Cetak PDF sertifikatmu.</li>
                   </ol>
                 </div>
                 <button style={styles.primaryBtn} onClick={() => setActiveTab('apiKey')}>Lanjut ke Setup AI ➔</button>
@@ -418,7 +461,7 @@ export default function App() {
                 </div>
                 <form onSubmit={handleSaveApiKey}>
                   <label style={{fontSize: '13px', fontWeight: 'bold'}}>Google AI API Key:</label>
-                  <input type="password" placeholder="Paste kode API Key milikmu..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} required />
+                  <input type="password" placeholder="Paste kode API Key..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} required />
                   <button type="submit" style={styles.primaryBtn}>Validasi & Aktifkan 🔑</button>
                 </form>
               </div>
@@ -493,9 +536,9 @@ export default function App() {
                       </div>
                       <hr style={styles.certDivider} />
                       <div style={styles.certBody}>
-                        <p>Diterbitkan atas nama:</p>
+                        <p style={{margin: '2px 0'}}>Diterbitkan atas nama:</p>
                         <h2 style={styles.studentNameTitle}>{activePortfolio.studentName}</h2>
-                        <p style={{fontSize: '12px', margin: '2px 0'}}>Pengerjaan: <b>{activePortfolio.mode}</b> | {activePortfolio.timestamp}</p>
+                        <p style={{fontSize: '11px', margin: '2px 0'}}>Mata Pelajaran: <b>{activePortfolio.subjectName || teacherProfile.subject}</b> | {activePortfolio.timestamp}</p>
 
                         <div style={styles.statusBox}>
                           STATUS VALIDASI: 
@@ -523,12 +566,12 @@ export default function App() {
                         </div>
 
                         <div style={styles.diagnosticBoxCert}>
-                          <b>🤖 Diagnostik AI:</b> <span style={{fontSize: '12px'}}>{activePortfolio.diagnosis}</span>
+                          <b>🤖 Diagnostik AI:</b> <span style={{fontSize: '11px'}}>{activePortfolio.diagnosis}</span>
                         </div>
 
                         {activePortfolio.teacherFeedback && (
                           <div style={styles.teacherFeedbackCert}>
-                            <b>👨‍🏫 Catatan Guru:</b> <p style={{margin: '2px 0'}}>"{activePortfolio.teacherFeedback}"</p>
+                            <b>👨‍🏫 Catatan Guru ({activePortfolio.teacherName || teacherProfile.name}):</b> <p style={{margin: '2px 0'}}>"{activePortfolio.teacherFeedback}"</p>
                           </div>
                         )}
 
@@ -537,12 +580,10 @@ export default function App() {
                             <p style={{fontSize: '10px', color: '#64748b', margin: 0}}>Terverifikasi Sistem PENA</p>
                             <div style={styles.digitalSeal}>VALIDASI</div>
                           </div>
-                          {(activePortfolio.mode || '').includes('Kelompok') && (
-                            <div style={{textAlign: 'right'}}>
-                              <p style={{fontSize: '10px', color: '#64748b', margin: 0}}>Tanda Tangan Guru</p>
-                              <p style={{marginTop: '20px', fontWeight: 'bold', margin: 0}}>(___________________)</p>
-                            </div>
-                          )}
+                          <div style={{textAlign: 'right'}}>
+                            <p style={{fontSize: '10px', color: '#64748b', margin: 0}}>Pengajar / Guru</p>
+                            <p style={{marginTop: '15px', fontWeight: 'bold', fontSize: '11px', margin: 0}}>{activePortfolio.teacherName || teacherProfile.name}</p>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -558,7 +599,7 @@ export default function App() {
           <>
             {activeTab === 'guruSiswa' && (
               <div style={styles.card} className="no-print">
-                <h2>👥 Kelola Roster Kelas</h2>
+                <h2>👥 Kelola Roster Kelas ({teacherProfile.subject})</h2>
                 <form onSubmit={handleAddStudent} style={{display: 'flex', gap: '10px', marginBottom: '20px'}}>
                   <input type="text" placeholder="Nama siswa baru..." value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} style={{...styles.input, margin: 0, flex: 1}} required />
                   <button type="submit" style={{...styles.primaryBtn, margin: 0, flex: 'none', width: 'auto'}}>+ Tambah Siswa</button>
@@ -585,12 +626,18 @@ export default function App() {
             {activeTab === 'guruDashboard' && (
               <div style={styles.card} className="no-print">
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px'}}>
-                  <h2>📊 Evaluasi Tugas Naskah</h2>
-                  {/* POIN 1: TOMBOL RESET TOTAL SYSTEM KE PABRIK */}
-                  <button style={styles.dangerBtn} onClick={handleResetEntireSystem}>⚠️ Reset Total & Bersihkan Semua Data</button>
+                  <div>
+                    <h2 style={{margin: 0}}>📊 Evaluasi Tugas Naskah</h2>
+                    <p style={{fontSize: '12px', color: '#475569', margin: '4px 0 0 0'}}>Pengajar: <b>{teacherProfile.name}</b> | Mapel: <b>{teacherProfile.subject}</b></p>
+                  </div>
+                  {/* POIN 1: TOMBOL DOWNLOAD BACKUP & RESET BERSIH */}
+                  <div style={{display: 'flex', gap: '8px'}}>
+                    <button style={styles.downloadBtn} onClick={handleDownloadBackupData}>📥 Simpan Rekap (JSON)</button>
+                    <button style={styles.dangerBtn} onClick={handleBackupAndResetSystem}>🗑️ Bersihkan & Reset Sesi</button>
+                  </div>
                 </div>
 
-                {(!submissions || submissions.length === 0) ? <p>Belum ada tugas masuk.</p> : (
+                {(!submissions || submissions.length === 0) ? <p style={{marginTop: '20px'}}>Belum ada tugas masuk.</p> : (
                   <div style={{overflowX: 'auto'}}>
                     <table style={styles.table}>
                       <thead>
@@ -636,7 +683,6 @@ export default function App() {
                       <p style={{backgroundColor: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1'}}>"{selectedSubmission.deconstructionText}"</p>
                     </div>
                   </div>
-                  {/* POIN 2: MEMBUKA MODAL ACC KUSTOM KETIKA GURU KLIK TOMBOL ACC */}
                   <div style={{display: 'flex', gap: '10px', marginTop: '20px'}}>
                     <button style={styles.accBtnLarge} onClick={() => handleOpenAccModal(selectedSubmission.id)}>✅ ACC / Setujui + Catatan</button>
                     <button style={styles.rejectBtnLarge} onClick={() => { setTargetSubmissionId(selectedSubmission.id); setTeacherNoteInput(''); setShowRevisionModal(true); }}>❌ Minta Revisi</button>
@@ -645,11 +691,11 @@ export default function App() {
               </div>
             )}
 
-            {/* MODAL INPUT CATATAN KUSTOM SAAT ACC (POIN 2) */}
+            {/* MODAL CATATAN ACC */}
             {showAccModal && (
               <div style={styles.modalOverlay} className="no-print">
                 <div style={styles.modalCard}>
-                  <h3>✅ Berikan Catatan ACC untuk {selectedSubmission?.studentName}</h3>
+                  <h3>✅ Catatan ACC dari {teacherProfile.name}</h3>
                   <form onSubmit={handleSaveAccWithNote}>
                     <textarea rows="4" value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={styles.textarea} required />
                     <div style={{display: 'flex', gap: '10px', marginTop: '10px'}}>
@@ -682,7 +728,7 @@ export default function App() {
   );
 }
 
-// --- STYLING CSS (A4 PRESISI) ---
+// --- STYLING CSS ---
 const styles = {
   appContainer: { fontFamily: 'Inter, sans-serif', maxWidth: '850px', margin: '20px auto', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '10px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', color: 'white', padding: '15px 20px', borderRadius: '8px' },
@@ -706,6 +752,7 @@ const styles = {
   primaryBtn: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '12px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', width: '100%', fontSize: '14px' },
   printBtn: { backgroundColor: '#0284c7', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', flex: 1 },
   clearBtn: { backgroundColor: '#dc2626', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', flex: 1 },
+  downloadBtn: { backgroundColor: '#16a34a', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' },
   dangerBtn: { backgroundColor: '#991b1b', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' },
   
   formGroup: { marginBottom: '15px' },
@@ -718,7 +765,6 @@ const styles = {
   modeActive: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', flex: 1 },
   modeInactive: { backgroundColor: '#e2e8f0', color: '#475569', border: 'none', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', flex: 1 },
   
-  // UKURAN SERTIFIKAT A4 PRESISI 1 HALAMAN (POIN 3)
   certBorder: { border: '4px double #1e3a8a', padding: '15px 20px', backgroundColor: '#fafaf9', height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' },
   certHeader: { textAlign: 'center' },
   certTitle: { color: '#1e3a8a', margin: '0', fontSize: '20px', fontWeight: '900' },
