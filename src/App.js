@@ -11,8 +11,9 @@ export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [selectedMode, setSelectedMode] = useState('mandiri');
 
-  // 2. STATE DETEKSI PELANGGARAN
+  // 2. STATE DETEKSI PELANGGARAN KHUSUS KANVAS DEKONSTRUKSI
   const [isPasted, setIsPasted] = useState(false);
+  const [tabSwitchCount, setTabSwitchCount] = useState(0);
 
   // Form Kanvas Siswa
   const [formData, setFormData] = useState({
@@ -23,7 +24,7 @@ export default function App() {
     deconstructionText: ''
   });
 
-  // 3. DATABASE LOKAL (PERSISTENT STATE DENGAN LOCALSTORAGE)
+  // 3. DATABASE LOKAL (PERSISTENT STATE LOCALSTORAGE)
   const [submissions, setSubmissions] = useState(() => {
     const saved = localStorage.getItem('PENA_SUBMISSIONS');
     if (saved) {
@@ -42,6 +43,7 @@ export default function App() {
         diagnosis: 'Kritis & Mendalam',
         aiNotes: 'Penguraian nalar siswa terstruktur logis dan memenuhi kaidah kognitif.',
         hasCopyPasted: false,
+        tabSwitches: 0,
         isTooShort: false,
         timestamp: '15/10/2026, 14:30',
         status: 'Pending Review',
@@ -52,12 +54,27 @@ export default function App() {
 
   const [activeSubmissionId, setActiveSubmissionId] = useState(101);
 
+  // SENSOR PINDAH TAB / KELUAR BROWSER (HANYA AKTIF SAAT DI KANVAS WORKSPACE)
+  useEffect(() => {
+    if (activeTab !== 'workspace' || userRole !== 'siswa') return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setTabSwitchCount(prev => prev + 1);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [activeTab, userRole]);
+
   // Simpan Otomatis ke LocalStorage
   useEffect(() => {
     localStorage.setItem('PENA_SUBMISSIONS', JSON.stringify(submissions));
   }, [submissions]);
 
-  // Ambil data aktif siswa
   const activePortfolio = submissions.find(s => s.id === activeSubmissionId) || submissions[0];
 
   // State Modal Detail Guru
@@ -95,7 +112,6 @@ export default function App() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // Tangkap Event Copy-Paste
   const handlePasteDetect = () => {
     setIsPasted(true);
   };
@@ -110,7 +126,7 @@ export default function App() {
     setActiveTab('workspace');
   };
 
-  // SUBMIT KANVAS DENGAN SENSOR PELANGGARAN
+  // SUBMIT KANVAS DEKONSTRUKSI
   const handleSubmitCanvas = (e) => {
     e.preventDefault();
     const length = formData.deconstructionText.trim().length;
@@ -119,9 +135,11 @@ export default function App() {
     let diagnosis = 'Kritis & Mendalam';
     let aiNotes = 'Penguraian nalar terstruktur rapi berdasarkan indikator Ennis & Polya.';
 
-    if (isPasted || tooShort) {
-      diagnosis = 'PERINGATAN: Ketergantungan Instan AI / Pelanggaran Nalar';
-      aiNotes = `Sistem mendeteksi indikasi kecurangan: ${isPasted ? '[Salin-Tempel Teks AI]' : ''} ${tooShort ? '[Jawaban Kurang Karakter / Dangkal]' : ''}. Dekonstruksi mandiri belum terpenuhi secara substansial.`;
+    const hasViolations = isPasted || tooShort || tabSwitchCount > 0;
+
+    if (hasViolations) {
+      diagnosis = 'PERINGATAN: Ketergantungan Instan AI / Catatan Pelanggaran Nalar';
+      aiNotes = `Terdeteksi indikasi ketergantungan instan: ${isPasted ? '[Salin-Tempel Teks AI] ' : ''}${tabSwitchCount > 0 ? `[Keluar Web/Pindah Tab ${tabSwitchCount}x] ` : ''}${tooShort ? '[Jawaban Dangkal/Kurang Karakter]' : ''}. Silakan tinjau ulang dekonstruksi mandiri Anda.`;
     }
 
     const newCertNum = `PENA-2026-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -139,6 +157,7 @@ export default function App() {
       diagnosis: diagnosis,
       aiNotes: aiNotes,
       hasCopyPasted: isPasted,
+      tabSwitches: tabSwitchCount,
       isTooShort: tooShort,
       timestamp: new Date().toLocaleString(),
       status: selectedMode === 'mandiri' ? 'Disetujui Otomatis (Mandiri)' : 'Pending Review',
@@ -147,7 +166,10 @@ export default function App() {
 
     setSubmissions([newSubmission, ...submissions]);
     setActiveSubmissionId(newId);
-    setIsPasted(false); // Reset sensor
+    
+    // Reset Sensor Pelanggaran untuk Pengerjaan Berikutnya
+    setIsPasted(false);
+    setTabSwitchCount(0);
     setActiveTab('portfolio');
   };
 
@@ -274,6 +296,9 @@ export default function App() {
           <div style={styles.card} className="no-print">
             <span style={styles.badge}>Poin 2: Guide API Key</span>
             <h2>Pengaturan Google AI Studio</h2>
+            <p style={{fontSize: '12px', color: '#16a34a', fontWeight: 'bold'}}>
+              ℹ️ Bebas membuka tab/situs luar di tahap ini untuk mengambil API Key tanpa dikurangi poin.
+            </p>
             <ol style={styles.list}>
               <li>Buka <b>aistudio.google.com</b>.</li>
               <li>Klik tombol <b>Create API Key</b>.</li>
@@ -294,11 +319,23 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= 3, 5, & 6. KANVAS NALAR ================= */}
+        {/* ================= 3, 5, & 6. KANVAS DEKONSTRUKSI NALAR (SENSING ACTIVE) ================= */}
         {activeTab === 'workspace' && userRole === 'siswa' && (
           <div style={styles.card} className="no-print">
-            <span style={styles.badge}>Poin 3, 5, 6: WorkSpace</span>
-            <h2>Kanvas Dekonstruksi Nalar</h2>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+              <span style={styles.badge}>Poin 3, 5, 6: WorkSpace</span>
+              <span style={{fontSize: '11px', backgroundColor: '#fee2e2', color: '#991b1b', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold'}}>
+                🔴 Sistem Pengawasan Nalar Aktif
+              </span>
+            </div>
+
+            <h2 style={{marginTop: '10px'}}>Kanvas Dekonstruksi Nalar Mandiri</h2>
+
+            {/* STATUS MONITORING REALTIME */}
+            <div style={styles.monitoringBar}>
+              <span>👀 Keluar Web / Pindah Tab: <b style={{color: tabSwitchCount > 0 ? '#dc2626' : '#16a34a'}}>{tabSwitchCount} Kali</b></span>
+              <span>📋 Terdeteksi Paste: <b style={{color: isPasted ? '#dc2626' : '#16a34a'}}>{isPasted ? 'YA' : 'TIDAK'}</b></span>
+            </div>
 
             <div style={styles.modeBox}>
               <label><b>Pilih Modus Operasional:</b></label>
@@ -355,8 +392,7 @@ export default function App() {
 
               <div style={styles.formGroup}>
                 <label>
-                  Dekonstruksi Nalar Mandiri 
-                  <span style={{fontSize: '11px', color: '#dc2626', marginLeft: '6px'}}>(Sistem mendeteksi Copy-Paste & Karakter Singkat)</span>:
+                  Uraian Dekonstruksi Nalar Mandiri:
                 </label>
                 <textarea 
                   name="deconstructionText" 
@@ -364,15 +400,10 @@ export default function App() {
                   value={formData.deconstructionText} 
                   onChange={handleInputChange} 
                   onPaste={handlePasteDetect} 
-                  placeholder="Ketik analisis nalar mandiri kamu di sini..." 
+                  placeholder="Ketik analisis nalar mandiri Anda secara jujur di sini..." 
                   style={styles.textarea} 
                   required 
                 />
-                {isPasted && (
-                  <p style={{color: '#dc2626', fontSize: '11px', margin: '2px 0'}}>
-                    ⚠️ Terdeteksi aksi Copy-Paste! Pelanggaran ini akan dicatat di Laporan Diagnostik AI.
-                  </p>
-                )}
               </div>
 
               <button type="submit" style={styles.primaryBtn}>Kirim & Hasilkan E-Portofolio PDF 🚀</button>
@@ -380,13 +411,13 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= 4. SERTIFIKAT E-PORTOFOLIO RESMI (SERTA DETEKSI REALTIME) ================= */}
+        {/* ================= 4. SERTIFIKAT E-PORTOFOLIO RESMI ================= */}
         {activeTab === 'portfolio' && userRole === 'siswa' && (
           <div>
             <div style={{marginBottom: '15px', display: 'flex', justifyContent: 'space-between'}} className="no-print">
               <div>
                 <h3>🎓 E-Portofolio Digital & Sertifikat Nalar</h3>
-                <p style={{fontSize: '12px', color: '#64748b'}}>Status terhubung otomatis dengan peninjauan Guru.</p>
+                <p style={{fontSize: '12px', color: '#64748b'}}>Terhubung otomatis secara realtime dengan peninjauan Guru.</p>
               </div>
               <button style={styles.printBtn} onClick={() => window.print()}>
                 📄 Cetak / Download Sertifikat PDF
@@ -413,7 +444,7 @@ export default function App() {
                       Telah menyelesaikan pengerjaan pada <b>{activePortfolio.mode}</b> pada tanggal <b>{activePortfolio.timestamp}</b>.
                     </p>
 
-                    {/* BADGE STATUS DARI GURU (REALTIME UPDATE) */}
+                    {/* STATUS VERIFIKASI GURU */}
                     <div style={styles.statusBox}>
                       STATUS VERIFIKASI SEKARANG: 
                       <span style={{
@@ -428,12 +459,13 @@ export default function App() {
                       </span>
                     </div>
 
-                    {/* PELANGGARAN TERDETEKSI */}
-                    {(activePortfolio.hasCopyPasted || activePortfolio.isTooShort) && (
+                    {/* CATATAN PELANGGARAN TERDETEKSI */}
+                    {(activePortfolio.hasCopyPasted || activePortfolio.isTooShort || activePortfolio.tabSwitches > 0) && (
                       <div style={styles.violationCard}>
-                        <h4 style={{margin: '0 0 5px 0', color: '#991b1b'}}>⚠️ PELANGGARAN NALAR TERDETEKSI:</h4>
-                        {activePortfolio.hasCopyPasted && <p style={{margin: '2px 0'}}>• Terdeteksi melakukan Copy-Paste teks instan dari AI/sumber luar.</p>}
-                        {activePortfolio.isTooShort && <p style={{margin: '2px 0'}}>• Jawaban dekonstruksi terlalu pendek/dangkal (kurang dari 40 karakter).</p>}
+                        <h4 style={{margin: '0 0 5px 0', color: '#991b1b'}}>⚠️ REKAM JEJAK PELANGGARAN NALAR:</h4>
+                        {activePortfolio.tabSwitches > 0 && <p style={{margin: '2px 0'}}>• Terdeteksi keluar web / berpindah tab sebanyak <b>{activePortfolio.tabSwitches}x</b> saat pengerjaan dekonstruksi.</p>}
+                        {activePortfolio.hasCopyPasted && <p style={{margin: '2px 0'}}>• Terdeteksi melakukan aksi Copy-Paste teks dari luar.</p>}
+                        {activePortfolio.isTooShort && <p style={{margin: '2px 0'}}>• Jawaban dekonstruksi nalar kurang dari 40 karakter (terlalu dangkal).</p>}
                       </div>
                     )}
 
@@ -466,7 +498,7 @@ export default function App() {
                       <p><b>Catatan:</b> {activePortfolio.aiNotes}</p>
                     </div>
 
-                    {/* CATATAN REVISI / EVALUASI GURU */}
+                    {/* CATATAN EVALUASI GURU */}
                     {activePortfolio.teacherFeedback && (
                       <div style={styles.teacherFeedbackCert}>
                         <b>👨‍🏫 Evaluasi & Catatan Guru:</b>
@@ -501,7 +533,7 @@ export default function App() {
             <span style={styles.badge}>Poin 7: RBAC Guru Dashboard</span>
             <h2>Panel Kontrol Administratif Guru</h2>
             <p style={{fontSize: '13px', color: '#475569'}}>
-              Evaluasi kiriman siswa, periksa pelanggaran copy-paste, dan berikan ACC atau Catatan Revisi.
+              Evaluasi kiriman siswa, periksa rekam jejak keluar web/copy-paste, dan berikan ACC atau Catatan Revisi.
             </p>
 
             <table style={styles.table}>
@@ -509,7 +541,7 @@ export default function App() {
                 <tr style={{backgroundColor: '#e2e8f0', textAlign: 'left'}}>
                   <th style={styles.th}>Siswa</th>
                   <th style={styles.th}>Modus</th>
-                  <th style={styles.th}>Indikasi Pelanggaran</th>
+                  <th style={styles.th}>Pelanggaran Nalar</th>
                   <th style={styles.th}>Status</th>
                   <th style={styles.th}>Aksi Guru</th>
                 </tr>
@@ -520,12 +552,14 @@ export default function App() {
                     <td style={styles.td}><b>{sub.studentName}</b></td>
                     <td style={styles.td}>{sub.mode}</td>
                     <td style={styles.td}>
-                      {sub.hasCopyPasted || sub.isTooShort ? (
+                      {sub.hasCopyPasted || sub.isTooShort || sub.tabSwitches > 0 ? (
                         <span style={{color: '#dc2626', fontWeight: 'bold', fontSize: '11px'}}>
-                          ⚠️ {sub.hasCopyPasted ? 'Copy-Pasted ' : ''}{sub.isTooShort ? 'Terlalu Singkat' : ''}
+                          ⚠️ {sub.tabSwitches > 0 ? `Pindah Tab (${sub.tabSwitches}x) ` : ''}
+                          {sub.hasCopyPasted ? 'Copy-Paste ' : ''}
+                          {sub.isTooShort ? 'Dangkal' : ''}
                         </span>
                       ) : (
-                        <span style={{color: '#16a34a', fontSize: '11px'}}>✅ Aman</span>
+                        <span style={{color: '#16a34a', fontSize: '11px'}}>✅ Jujur & Aman</span>
                       )}
                     </td>
                     <td style={styles.td}>
@@ -552,7 +586,7 @@ export default function App() {
           </div>
         )}
 
-        {/* MODAL PERIKSA JAWABAN SISWA */}
+        {/* MODAL PERIKSA JAWABAN SISWA OLEH GURU */}
         {selectedSubmission && (
           <div style={styles.modalOverlay} className="no-print">
             <div style={styles.largeModalCard}>
@@ -565,11 +599,12 @@ export default function App() {
                 <p><b>Waktu Pengerjaan:</b> {selectedSubmission.timestamp}</p>
                 <p><b>Indikator Ennis:</b> {selectedSubmission.ennis} | <b>Tahapan Polya:</b> {selectedSubmission.polya}</p>
                 
-                {(selectedSubmission.hasCopyPasted || selectedSubmission.isTooShort) && (
+                {(selectedSubmission.hasCopyPasted || selectedSubmission.isTooShort || selectedSubmission.tabSwitches > 0) && (
                   <div style={styles.violationCard}>
                     <b>⚠️ CATATAN PELANGGARAN SISTEM:</b>
+                    {selectedSubmission.tabSwitches > 0 && <p style={{margin: '0'}}>• Siswa terdeteksi berpindah tab/keluar browser sebanyak <b>{selectedSubmission.tabSwitches} kali</b> saat mengisi dekonstruksi nalar.</p>}
                     {selectedSubmission.hasCopyPasted && <p style={{margin: '0'}}>• Siswa terdeteksi melakukan Copy-Paste teks luar.</p>}
-                    {selectedSubmission.isTooShort && <p style={{margin: '0'}}>• Teks dekonstruksi nalar sangat singkat/dangkal.</p>}
+                    {selectedSubmission.isTooShort && <p style={{margin: '0'}}>• Teks dekonstruksi nalar terlalu singkat/dangkal.</p>}
                   </div>
                 )}
 
@@ -618,7 +653,7 @@ export default function App() {
               <form onSubmit={handleSaveRevision}>
                 <textarea
                   rows="4"
-                  placeholder="Contoh: Jawaban kamu terdeteksi copy-paste dan terlalu singkat. Harap jelaskan lagi sesuai indikator Ennis..."
+                  placeholder="Contoh: Terdeteksi keluar tab 3 kali dan copy-paste. Harap tuliskan kembali penjelasan nalar secara jujur..."
                   value={teacherNoteInput}
                   onChange={(e) => setTeacherNoteInput(e.target.value)}
                   style={styles.textarea}
@@ -665,6 +700,7 @@ const styles = {
   textarea: { width: '100%', padding: '8px', margin: '8px 0 15px 0', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontFamily: 'inherit' },
   list: { fontSize: '13px', lineHeight: '1.6' },
   formGroup: { marginBottom: '10px' },
+  monitoringBar: { backgroundColor: '#eff6ff', padding: '8px 12px', borderRadius: '6px', margin: '10px 0', fontSize: '12px', display: 'flex', gap: '20px', border: '1px solid #bfdbfe' },
   modeBox: { backgroundColor: '#f1f5f9', padding: '10px', borderRadius: '6px', marginBottom: '15px' },
   modeActive: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '6px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' },
   modeInactive: { backgroundColor: '#e2e8f0', color: '#475569', border: 'none', padding: '6px 10px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer' },
