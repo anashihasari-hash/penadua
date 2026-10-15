@@ -15,7 +15,7 @@ export default function App() {
     } catch (e) { return []; }
   });
 
-  const [currentClass, setCurrentClass] = useState(null); // { teacher: '', subject: '' }
+  const [currentClass, setCurrentClass] = useState(null);
   
   // State Input Modal Guru
   const [showPinModal, setShowPinModal] = useState(false);
@@ -46,7 +46,6 @@ export default function App() {
       if (savedStudents) {
         setStudents(JSON.parse(savedStudents));
       } else {
-        // Data default (dummy) buat kelas baru
         const defaultStudents = [
           { id: 1, name: 'Budi Santoso', pin: '1234' },
           { id: 2, name: 'Siti Rahma', pin: '5678' }
@@ -60,32 +59,45 @@ export default function App() {
     } catch (e) { console.error(e); }
   }, [currentClass]);
 
-  // Polling Sinkronisasi buat iOS/Android biar realtime tanpa nyangkut
+  // Polling Sinkronisasi buat iOS/Android & Halaman Login
   useEffect(() => {
     const interval = setInterval(() => {
-      if (!currentClass) return;
-      const keys = getStorageKeys(currentClass);
       try {
-        const savedSub = localStorage.getItem(keys.submissions);
-        if (savedSub) setSubmissions(JSON.parse(savedSub));
-        
-        const savedStu = localStorage.getItem(keys.students);
-        if (savedStu) setStudents(JSON.parse(savedStu));
-
+        // 1. Selalu narik daftar kelas, walau belum login (ini yang kemarin bug)
         const savedClasses = localStorage.getItem('PENA_ALL_CLASSES');
-        if (savedClasses) setAllClasses(JSON.parse(savedClasses));
+        if (savedClasses) {
+          const parsedClasses = JSON.parse(savedClasses);
+          // Cek kalau ada beda biar ngga re-render terus
+          setAllClasses(prev => JSON.stringify(prev) !== savedClasses ? parsedClasses : prev);
+        }
+
+        // 2. Kalau udah masuk kelas, baru narik tugas & murid
+        if (currentClass) {
+          const keys = getStorageKeys(currentClass);
+          const savedSub = localStorage.getItem(keys.submissions);
+          if (savedSub) {
+            setSubmissions(prev => JSON.stringify(prev) !== savedSub ? JSON.parse(savedSub) : prev);
+          }
+          
+          const savedStu = localStorage.getItem(keys.students);
+          if (savedStu) {
+            setStudents(prev => JSON.stringify(prev) !== savedStu ? JSON.parse(savedStu) : prev);
+          }
+        }
       } catch (err) {}
-    }, 1500); // Polling tiap 1.5 detik
+    }, 1000); // Polling lebih cepet, tiap 1 detik
     return () => clearInterval(interval);
   }, [currentClass]);
 
-  // Auto-save kalau ada perubahan
+  // Auto-save kalau ada perubahan state
   useEffect(() => {
+    // Save allClasses langsung ke storage tiap ada perubahan
+    localStorage.setItem('PENA_ALL_CLASSES', JSON.stringify(allClasses));
+    
     if (!currentClass) return;
     const keys = getStorageKeys(currentClass);
     localStorage.setItem(keys.students, JSON.stringify(students));
     localStorage.setItem(keys.submissions, JSON.stringify(submissions));
-    localStorage.setItem('PENA_ALL_CLASSES', JSON.stringify(allClasses));
   }, [students, submissions, currentClass, allClasses]);
 
   // --- 4. LOGIN SISWA ---
@@ -168,17 +180,19 @@ export default function App() {
       
       const newClass = { teacher: teacherNameInput.trim(), subject: subjectInput.trim() };
       
-      // Cek apakah kelas ini udah pernah dibikin sebelumnya
       const classExists = allClasses.find(c => c.teacher === newClass.teacher && c.subject === newClass.subject);
       if (!classExists) {
-        setAllClasses([...allClasses, newClass]);
+        const updatedClasses = [...allClasses, newClass];
+        setAllClasses(updatedClasses);
+        // Langsung paku di storage saat itu juga!
+        localStorage.setItem('PENA_ALL_CLASSES', JSON.stringify(updatedClasses));
       }
 
       setCurrentClass(newClass);
       setUserRole('guru');
       setShowPinModal(false);
       setPinInput('');
-      setActiveTab('guruDashboard'); // Langsung lempar ke dashboard guru
+      setActiveTab('guruDashboard');
     } else {
       alert('❌ PIN Guru Salah!');
       setPinInput('');
@@ -193,7 +207,7 @@ export default function App() {
     
     const student = availableStudentsForLogin.find(s => s.name === loginSelectedName && s.pin === loginPin);
     if (student) {
-      setCurrentClass(allClasses[loginSelectedClassIndex]); // Set konteks kelas
+      setCurrentClass(allClasses[loginSelectedClassIndex]);
       setCurrentStudent(student);
       setUserRole('siswa');
       setActiveTab('introSiswa');
@@ -284,7 +298,6 @@ export default function App() {
     }
   };
 
-  // Bersihkan Khusus Kelas Guru yang lagi Aktif
   const handleClearClassData = () => {
     const confirmReset = window.confirm(`⚠️ PERINGATAN:\nTindakan ini bakal ngehapus SEMUA tugas siswa di kelas ${currentClass.subject} (${currentClass.teacher}).\nLanjut bersihin?`);
     if (confirmReset) {
@@ -293,7 +306,6 @@ export default function App() {
     }
   };
 
-  // Fungsi ACC & Minta Revisi
   const handleOpenAccModal = (id) => {
     setTargetSubmissionId(id);
     setTeacherNoteInput('Bagus! Pertanggungjawaban nalar logis dan memenuhi kaidah berpikir kritis.');
@@ -322,7 +334,6 @@ export default function App() {
 
   return (
     <div style={styles.appContainer}>
-      {/* iOS Cache Buster Meta & A4 Print CSS */}
       <style dangerouslySetInnerHTML={{ __html: `
         @page { size: A4 portrait; margin: 10mm; }
         @media print {
@@ -336,7 +347,6 @@ export default function App() {
         }
       `}} />
 
-      {/* HEADER GLOBAL */}
       <header style={styles.header} className="no-print">
         <h2 style={styles.logoText}>PENA 🛡️</h2>
         {userRole && (
@@ -344,7 +354,6 @@ export default function App() {
         )}
       </header>
 
-      {/* LANDING UTAMA */}
       {!userRole && activeTab === 'landing' && (
         <div style={styles.card} className="no-print">
           <h1 style={{textAlign: 'center', color: '#1e3a8a'}}>Platform Pertanggungjawaban Nalar (PENA)</h1>
@@ -375,7 +384,6 @@ export default function App() {
         </div>
       )}
 
-      {/* LOGIN SISWA DENGAN PILIHAN KELAS/GURU */}
       {!userRole && activeTab === 'loginSiswa' && (
         <div style={styles.card} className="no-print">
           <button style={styles.backBtn} onClick={() => setActiveTab('landing')}>⬅ Kembali</button>
@@ -414,7 +422,6 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL SETUP GURU (NAMBAHIN MAPEL & NAMA) */}
       {showPinModal && (
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard}>
@@ -446,7 +453,6 @@ export default function App() {
         </div>
       )}
 
-      {/* NAVIGASI */}
       {userRole && (
         <nav style={styles.navBar} className="no-print">
           {userRole === 'siswa' && (
@@ -470,7 +476,6 @@ export default function App() {
       )}
 
       <main style={styles.mainContent}>
-        {/* ALUR SISWA */}
         {userRole === 'siswa' && currentStudent && (
           <>
             {activeTab === 'introSiswa' && (
@@ -640,7 +645,6 @@ export default function App() {
           </>
         )}
 
-        {/* ALUR GURU (Disini nih bug-nya udah gua cabut isGuruAuthed) */}
         {userRole === 'guru' && (
           <>
             {activeTab === 'guruSiswa' && (
@@ -706,7 +710,6 @@ export default function App() {
               </div>
             )}
 
-            {/* MODAL EVALUASI GURU */}
             {selectedSubmission && (
               <div style={styles.modalOverlay} className="no-print">
                 <div style={styles.largeModalCard}>
@@ -733,7 +736,6 @@ export default function App() {
               </div>
             )}
 
-            {/* MODAL INPUT CATATAN KUSTOM SAAT ACC */}
             {showAccModal && (
               <div style={styles.modalOverlay} className="no-print">
                 <div style={styles.modalCard}>
@@ -749,7 +751,6 @@ export default function App() {
               </div>
             )}
 
-            {/* MODAL REVISI */}
             {showRevisionModal && (
               <div style={styles.modalOverlay} className="no-print">
                 <div style={styles.modalCard}>
@@ -771,7 +772,6 @@ export default function App() {
   );
 }
 
-// --- STYLING CSS (A4 PRESISI) ---
 const styles = {
   appContainer: { fontFamily: 'Inter, sans-serif', maxWidth: '850px', margin: '20px auto', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '10px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', color: 'white', padding: '15px 20px', borderRadius: '8px' },
