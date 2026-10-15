@@ -192,24 +192,33 @@ export default function App() {
   const activePortfolio = submissions.find(s => s.id === activeSubmissionId);
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Minta Revisi';
 
-  // --- 6. INTEGRASI GOOGLE AI ASLI ---
+  // --- 6. INTEGRASI GOOGLE AI ASLI (DENGAN TANGKAP ERROR) ---
   const checkApiValidity = async (e) => {
     e.preventDefault();
-    if (apiKey.length < 20) { alert('❌ API Key lu ngawur, kependekan!'); return; }
+    const cleanKey = apiKey.trim();
+    if (cleanKey.length < 20) { alert('❌ API Key lu ngawur, kependekan!'); return; }
     setIsCheckingApi(true);
+    
     try {
       // Tembak dummy request ke Google Gemini buat ngetes kunci
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cleanKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: "Balas dengan kata 'OK' saja." }] }] })
       });
-      if (!res.ok) throw new Error('API Key tidak valid/limit');
+      
+      if (!res.ok) {
+        // Kalau ditolak, kita tarik pesan error dari server Google
+        const errorData = await res.json();
+        throw new Error(errorData.error?.message || 'Akses ditolak server Google');
+      }
+      
       setIsApiValid(true);
+      setApiKey(cleanKey); // Update state dengan key yang udah bersih (tanpa spasi)
       setActiveTab('workspace');
       alert('✅ API Key Valid! Berhasil Konek ke Mesin Google.');
     } catch (error) {
-      alert('❌ API Key Ditolak Google! Coba cek lagi kodenya.');
+      alert(`❌ Gagal Konek! Kata Google: \n"${error.message}"\n\n(Cek lagi API Key lu beneran aktif kaga, atau salah copas)`);
       setIsApiValid(false);
     }
     setIsCheckingApi(false);
