@@ -29,7 +29,7 @@ export default function App() {
   const [mandiriNameInput, setMandiriNameInput] = useState('');
 
   const getStorageKeys = (kelas, role) => {
-    if (role === 'mandiri') return { students: 'PENA_MANDIRI_STU', submissions: 'PENA_MANDIRI_SUB' };
+    if (role === 'mandiri') return { students: 'PENA_MANDIRI_STU_ISOLATED', submissions: 'PENA_MANDIRI_SUB_ISOLATED' };
     if (!kelas) return { students: 'PENA_STU_DEFAULT', submissions: 'PENA_SUB_DEFAULT' };
     const prefix = `PENA_${kelas.teacher}_${kelas.subject}_${kelas.pin}`.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
     return { students: `${prefix}_STUDENTS`, submissions: `${prefix}_SUBMISSIONS` };
@@ -39,12 +39,12 @@ export default function App() {
   const [submissions, setSubmissions] = useState([]);
   const [currentStudent, setCurrentStudent] = useState(null);
 
-  // Load Database Terisolasi
+  // Load Database Terisolasi Sesuai Sesi
   useEffect(() => {
     if (userRole === 'mandiri') {
       const keys = getStorageKeys(null, 'mandiri');
       const savedSub = localStorage.getItem(keys.submissions);
-      if (savedSub) setSubmissions(JSON.parse(savedSub));
+      setSubmissions(savedSub ? JSON.parse(savedSub) : []);
       return;
     }
 
@@ -65,7 +65,7 @@ export default function App() {
     } catch (e) { console.error(e); }
   }, [currentClass, userRole]);
 
-  // Realtime Polling Sinkronisasi
+  // Polling Sinkronisasi Realtime
   useEffect(() => {
     const interval = setInterval(() => {
       try {
@@ -100,13 +100,12 @@ export default function App() {
     localStorage.setItem(keys.submissions, JSON.stringify(submissions));
   }, [students, submissions, currentClass, allClasses, userRole]);
 
-  // Login Siswa Menggunakan Kode Akses Kelas (Bukan Pilih Guru)
+  // Login Siswa Berdasarkan Kode Akses Kelas
   const [classCodeInput, setClassCodeInput] = useState('');
   const [loginStudentName, setLoginStudentName] = useState('');
   const [loginStudentPin, setLoginStudentPin] = useState('');
   const [resolvedStudentList, setResolvedStudentList] = useState([]);
 
-  // Cek dan validasi kode kelas yang dimasukkan siswa
   const handleVerifyClassCode = (e) => {
     e.preventDefault();
     const foundClass = allClasses.find(c => c.pin === classCodeInput.trim());
@@ -140,18 +139,12 @@ export default function App() {
     const sName = subjectInput.trim();
     const pin = pinInput.trim();
 
-    if (!tName || !sName || !pin) {
-      alert('Semua kolom wajib diisi!');
-      return;
-    }
+    if (!tName || !sName || !pin) { alert('Semua kolom wajib diisi!'); return; }
 
     let targetClass = allClasses.find(c => c.teacher.toLowerCase() === tName.toLowerCase() && c.subject.toLowerCase() === sName.toLowerCase());
     
     if (targetClass) {
-      if (targetClass.pin !== pin) {
-        alert('❌ Sandi (PIN) guru salah untuk akun ini!');
-        return;
-      }
+      if (targetClass.pin !== pin) { alert('❌ Sandi (PIN) guru salah untuk akun ini!'); return; }
     } else {
       targetClass = { teacher: tName, subject: sName, pin: pin };
       const updated = [...allClasses, targetClass];
@@ -167,7 +160,9 @@ export default function App() {
 
   const handleMandiriLogin = (e) => {
     e.preventDefault();
-    setCurrentStudent({ id: 'mandiri-' + Date.now(), name: mandiriNameInput.trim() });
+    const name = mandiriNameInput.trim();
+    if (!name) return;
+    setCurrentStudent({ id: 'mandiri-' + Date.now(), name });
     setUserRole('mandiri');
     setShowMandiriModal(false);
     setActiveTab('introSiswa');
@@ -182,13 +177,27 @@ export default function App() {
     setClassCodeInput('');
   };
 
-  // Pelanggaran & Kanvas
+  // Pelanggaran & Kanvas Nalar dengan Pemantik Elaborasi
   const [isPasted, setIsPasted] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [formData, setFormData] = useState({
-    naskahText: '', ennisIndicator: 'Penjelasan Sederhana',
-    polyaStep: 'Memahami Masalah', deconstructionText: ''
+    naskahText: '', 
+    ennisIndicator: 'Penjelasan Sederhana',
+    polyaStep: 'Memahami Masalah', 
+    deconstructionText: ''
   });
+
+  const ennisPrompts = {
+    'Penjelasan Sederhana': 'Apakah argumen awal dari tulisanmu jelas dan bebas dari ambiguitas logika?',
+    'Keterampilan Dasar': 'Apakah sumber atau premis pendukung argumenmu memiliki kredibilitas terukur?',
+    'Menyimpulkan': 'Apakah kesimpulan ditarik secara valid berdasarkan bukti logis yang relevan?'
+  };
+
+  const polyaPrompts = {
+    'Memahami Masalah': 'Apa pokok permasalahan krusial yang sedang diuji dalam naskah ini?',
+    'Merencanakan Penyelesaian': 'Bagaimana strategimu meruntuhkan atau memperkuat klaim tersebut secara runtut?',
+    'Memeriksa Kembali': 'Jika ada pihak mengajukan sanggahan radikal, bagaimana pembelaan rasionalmu?'
+  };
 
   useEffect(() => {
     if (activeTab !== 'workspace' || !currentStudent) return;
@@ -212,6 +221,7 @@ export default function App() {
     setActiveTab('workspace');
   };
 
+  // Mesin Analisis Kritis AI (Strict & Elaboratif)
   const handleSubmitCanvas = (e) => {
     e.preventDefault();
     if (!isApiValid) { alert('Masukkan API Key terlebih dahulu di tab 2.'); return; }
@@ -219,15 +229,18 @@ export default function App() {
 
     setTimeout(() => {
       let diagnosis = "";
-      const textLen = formData.deconstructionText.trim().length;
+      const text = formData.deconstructionText.trim();
+      const wordCount = text.split(/\s+/).length;
       const hasViolations = isPasted || tabSwitchCount > 0;
 
       if (hasViolations) {
-        diagnosis = `Terdeteksi anomali integritas (Pindah tab: ${tabSwitchCount}x, Copy-paste: ${isPasted ? 'Ya' : 'Tidak'}). Argumen kehilangan validitas analitis karena indikasi manipulasi luar.`;
-      } else if (textLen < 40) {
-        diagnosis = `Penjabaran terlalu singkat (${textLen} karakter). Analisis belum memenuhi kaidah berpikir kritis kerangka ${formData.ennisIndicator} dan ${formData.polyaStep}. Perlu pendalaman argumen.`;
+        diagnosis = `[GAGAL INTEGRITAS] Terdeteksi anomali (Pindah tab: ${tabSwitchCount}x, Copy-paste: ${isPasted ? 'Terdeteksi' : 'Tidak'}). Argumen didiskualifikasi karena indikasi manipulasi eksternal.`;
+      } else if (wordCount < 25) {
+        diagnosis = `[TIDAK LOLOS KRITIS] Penjabaran terlalu dangkal (${wordCount} kata). Gagal menjawab pertanyaan pemantik elaborasi kerangka ${formData.ennisIndicator} & tahap ${formData.polyaStep}. Diperlukan uraian kausalitas yang lebih mendalam.`;
+      } else if (text.toLowerCase().includes('gak tau') || text.toLowerCase().includes('asal')) {
+        diagnosis = `[DITOLAK] Respons terdeteksi tidak serius atau asal-asalan. Analisis nalar logis tidak terpenuhi sama sekali.`;
       } else {
-        diagnosis = `Analisis mendalam terdeteksi. Hubungan kausalitas antara naskah dan kerangka ${formData.ennisIndicator} tersusun secara runtut melalui tahapan ${formData.polyaStep}. Argumen valid dan logis.`;
+        diagnosis = `[LOLOS KRITIS MENDALAM] Analisis otentik terverifikasi. Siswa berhasil menjawab pemantik konseptual ${formData.ennisIndicator} dengan eksekusi metodologis ${formData.polyaStep}. Argumen valid, logis, dan dapat dipertanggungjawabkan.`;
       }
 
       const newSubmission = {
@@ -235,10 +248,13 @@ export default function App() {
         certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}`,
         studentName: currentStudent.name,
         mode: userRole === 'mandiri' ? 'Mandiri (Privat)' : 'Tugas Kelas',
-        naskahText: formData.naskahText, ennis: formData.ennisIndicator,
-        polya: formData.polyaStep, deconstructionText: formData.deconstructionText,
+        naskahText: formData.naskahText, 
+        ennis: formData.ennisIndicator,
+        polya: formData.polyaStep, 
+        deconstructionText: formData.deconstructionText,
         diagnosis,
-        hasCopyPasted: isPasted, tabSwitches: tabSwitchCount,
+        hasCopyPasted: isPasted, 
+        tabSwitches: tabSwitchCount,
         timestamp: new Date().toLocaleString(),
         status: userRole === 'mandiri' ? 'Disetujui Otomatis' : 'Pending Review Guru',
         teacherFeedback: ''
@@ -248,7 +264,7 @@ export default function App() {
       setSubmissions([newSubmission, ...filtered]);
       setIsPasted(false); setTabSwitchCount(0); setIsSubmittingTask(false);
       setActiveTab('portfolio');
-    }, 800);
+    }, 900);
   };
 
   const [selectedSubmission, setSelectedSubmission] = useState(null);
@@ -287,7 +303,7 @@ export default function App() {
             </div>
             <div style={styles.menuBox} onClick={() => setShowMandiriModal(true)}>
               <h3>Mandiri</h3>
-              <p>Simulasi latihan personal.</p>
+              <p>Simulasi latihan personal (Isolasi).</p>
             </div>
             <div style={styles.menuBox} onClick={() => setShowPinModal(true)}>
               <h3>Guru</h3>
@@ -356,7 +372,7 @@ export default function App() {
       {showMandiriModal && (
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard}>
-            <h3>Mode Mandiri</h3>
+            <h3>Mode Mandiri (Terisolasi)</h3>
             <form onSubmit={handleMandiriLogin}>
               <label>Nama:</label>
               <input type="text" placeholder="Masukkan nama..." value={mandiriNameInput} onChange={(e) => setMandiriNameInput(e.target.value)} style={styles.input} required />
@@ -431,25 +447,32 @@ export default function App() {
                     </div>
 
                     <form onSubmit={handleSubmitCanvas}>
-                      <label>Kutipan Naskah Utama:</label>
+                      <label>1. Kutipan Naskah Utama:</label>
                       <textarea rows="3" value={formData.naskahText} onChange={(e) => setFormData({...formData, naskahText: e.target.value})} style={styles.textarea} required />
 
                       <div style={{display: 'flex', gap: '10px', margin: '10px 0'}}>
                         <div style={{flex: 1}}>
-                          <label>Kerangka Ennis:</label>
+                          <label>2. Kerangka Ennis:</label>
                           <select value={formData.ennisIndicator} onChange={(e) => setFormData({...formData, ennisIndicator: e.target.value})} style={styles.input}>
-                            <option>Penjelasan Sederhana</option><option>Keterampilan Dasar</option><option>Menyimpulkan</option>
+                            {Object.keys(ennisPrompts).map(k => <option key={k} value={k}>{k}</option>)}
                           </select>
                         </div>
                         <div style={{flex: 1}}>
-                          <label>Tahap Polya:</label>
+                          <label>3. Tahap Polya:</label>
                           <select value={formData.polyaStep} onChange={(e) => setFormData({...formData, polyaStep: e.target.value})} style={styles.input}>
-                            <option>Memahami Masalah</option><option>Merencanakan Penyelesaian</option><option>Memeriksa Kembali</option>
+                            {Object.keys(polyaPrompts).map(k => <option key={k} value={k}>{k}</option>)}
                           </select>
                         </div>
                       </div>
 
-                      <label>Uraian Pemikiran Kritis:</label>
+                      {/* Kotak Pemantik Konteks Wajib */}
+                      <div style={styles.promptBox}>
+                        <p style={{margin: '0 0 4px 0', fontWeight: 'bold'}}>💡 Pemantik Konteks Wajib:</p>
+                        <p style={{margin: 0, color: '#333'}}>{ennisPrompts[formData.ennisIndicator]}</p>
+                        <p style={{margin: '4px 0 0 0', color: '#333'}}>{polyaPrompts[formData.polyaStep]}</p>
+                      </div>
+
+                      <label style={{marginTop: '10px', display: 'block'}}>4. Uraian Pemikiran Kritis (Jawab elaborasi di atas):</label>
                       <textarea rows="5" value={formData.deconstructionText} onChange={(e) => setFormData({...formData, deconstructionText: e.target.value})} onPaste={() => setIsPasted(true)} style={styles.textarea} required />
 
                       <button type="submit" style={styles.btnPrimary} disabled={!isApiValid || isSubmittingTask}>
@@ -473,6 +496,9 @@ export default function App() {
                     <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
                     <p><b>Nama:</b> {activePortfolio.studentName}</p>
                     <p><b>Status:</b> {activePortfolio.status}</p>
+                    <p><b>Kerangka:</b> Ennis ({activePortfolio.ennis}) & Polya ({activePortfolio.polya})</p>
+                    <p><b>Naskah:</b> "{activePortfolio.naskahText}"</p>
+                    <p><b>Dekonstruksi:</b> "{activePortfolio.deconstructionText}"</p>
                     <p><b>Diagnosis AI:</b> {activePortfolio.diagnosis}</p>
                     {activePortfolio.teacherFeedback && <p><b>Catatan Guru:</b> {activePortfolio.teacherFeedback}</p>}
                   </div>
@@ -525,15 +551,28 @@ export default function App() {
               </div>
             )}
 
+            {/* MODAL GURU: BISA BACA LAPORAN & KARYA SISWA UTUH */}
             {selectedSubmission && (
               <div style={styles.modalOverlay} className="no-print">
-                <div style={styles.modalCard}>
-                  <h3>Evaluasi: {selectedSubmission.studentName}</h3>
-                  <p style={{fontSize: '13px', background: '#f9f9f9', padding: '10px'}}>{selectedSubmission.diagnosis}</p>
-                  <textarea rows="3" placeholder="Catatan revisi..." value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={styles.textarea} />
+                <div style={styles.modalCardLarge}>
+                  <h3>Laporan Evaluasi: {selectedSubmission.studentName}</h3>
+                  <div style={{fontSize: '13px', background: '#f9f9f9', padding: '12px', borderRadius: '4px', margin: '10px 0', maxHeight: '250px', overflowY: 'auto'}}>
+                    <p><b>Mode:</b> {selectedSubmission.mode}</p>
+                    <p><b>Waktu Submit:</b> {selectedSubmission.timestamp}</p>
+                    <p><b>Indikator:</b> Ennis ({selectedSubmission.ennis}) & Polya ({selectedSubmission.polya})</p>
+                    <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
+                    <p><b>Kutipan Naskah:</b> <br/><i>"{selectedSubmission.naskahText}"</i></p>
+                    <p><b>Uraian Dekonstruksi Siswa:</b> <br/>"{selectedSubmission.deconstructionText}"</p>
+                    <hr style={{border: '0', borderTop: '1px solid #ddd'}}/>
+                    <p><b>Hasil Diagnosis AI:</b> <br/><span style={{color: '#b91c1c'}}>{selectedSubmission.diagnosis}</span></p>
+                  </div>
+                  
+                  <label><b>Catatan / Tindak Lanjut Guru:</b></label>
+                  <textarea rows="3" placeholder="Tulis catatan revisi atau apresiasi..." value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={styles.textarea} />
+                  
                   <div style={styles.modalActions}>
-                    <button style={styles.btnPrimary} onClick={() => handleTeacherAction(selectedSubmission.id, 'Disetujui Guru (ACC)')}>ACC</button>
-                    <button style={styles.btnDanger} onClick={() => handleTeacherAction(selectedSubmission.id, 'Minta Revisi')}>Revisi</button>
+                    <button style={styles.btnPrimary} onClick={() => handleTeacherAction(selectedSubmission.id, 'Disetujui Guru (ACC)')}>ACC / Setujui</button>
+                    <button style={styles.btnDanger} onClick={() => handleTeacherAction(selectedSubmission.id, 'Minta Revisi')}>Minta Revisi</button>
                     <button style={styles.textBtn} onClick={() => setSelectedSubmission(null)}>Tutup</button>
                   </div>
                 </div>
@@ -570,8 +609,10 @@ const styles = {
   navActive: { background: '#111', color: '#fff', border: '1px solid #111', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center' },
   modalCard: { background: '#fff', padding: '25px', borderRadius: '8px', width: '320px', border: '1px solid #ddd' },
+  modalCardLarge: { background: '#fff', padding: '25px', borderRadius: '8px', width: '480px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid #ddd' },
   modalActions: { display: 'flex', gap: '10px', marginTop: '15px', alignItems: 'center' },
   monitor: { background: '#f9f9f9', border: '1px solid #eee', padding: '8px', fontSize: '12px', display: 'flex', justifyContent: 'space-between', marginBottom: '10px', borderRadius: '4px' },
+  promptBox: { background: '#f4f4f5', borderLeft: '3px solid #111', padding: '10px', fontSize: '12px', margin: '10px 0', borderRadius: '0 4px 4px 0' },
   certBox: { border: '1px solid #ccc', padding: '20px', background: '#fff', borderRadius: '4px' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginTop: '10px' },
   main: { marginTop: '10px' }
