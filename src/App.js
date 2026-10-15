@@ -12,8 +12,8 @@ const session = {
   clear: () => ['PENA_ROLE', 'PENA_TAB', 'PENA_CLASS', 'PENA_STUDENT'].forEach(k => localStorage.removeItem(k))
 };
 
-// MASUKIN API KEY ASLI LU DI SINI. Jika terisi, tab API Key akan disembunyikan dari siswa.
-const DEFAULT_API_KEY = "const DEFAULT_API_KEY = process.env.REACT_APP_GEMINI_API_KEY || "";"; 
+// Kunci ditarik dari brankas rahasia Vercel (Environment Variables)
+const DEFAULT_API_KEY = process.env.REACT_APP_GEMINI_API_KEY || ""; 
 const MASTER_ADMIN_PASSWORD = "adminpena"; // Sandi utama untuk akses menu Guru
 
 export default function App() {
@@ -119,7 +119,6 @@ export default function App() {
     if (student) {
       setCurrentStudent(student);
       setUserRole('siswa');
-      // Otomatis skip tab API jika API default sudah valid
       setActiveTab(isApiValid ? 'workspace' : 'introSiswa');
     } else {
       alert('❌ Nama atau PIN Siswa salah.');
@@ -320,7 +319,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL GATE ADMIN (PENCEGAH SISWA ISENG) */}
+      {/* MODAL GATE ADMIN */}
       {showAdminGate && (
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard}>
@@ -588,7 +587,7 @@ export default function App() {
                     <li key={s.id} style={{display: 'flex', justifyContent: 'space-between', padding: '12px', borderBottom: '1px solid #f1f5f9'}}>
                       <span><b>{s.name}</b> <span style={{color: '#94a3b8'}}>| PIN Autentikasi:</span> <span style={{color: '#dc2626', fontWeight: '800'}}>{s.pin}</span></span>
                       <button style={{background: 'none', border: 'none', color: '#b91c1c', cursor: 'pointer', fontWeight: '600'}} onClick={() => {
-                        if(window.confirm('C cabut akses siswa ini?')) {
+                        if(window.confirm('Cabut akses siswa ini?')) {
                           const updated = students.filter(st => st.id !== s.id);
                           setStudents(updated);
                           localStorage.setItem(getStorageKeys(currentClass, userRole).students, JSON.stringify(updated));
