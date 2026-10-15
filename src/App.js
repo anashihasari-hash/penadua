@@ -7,40 +7,93 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
 
-  // Identitas Guru & Mapel (Poin 2)
-  const [teacherProfile, setTeacherProfile] = useState(() => {
-    try {
-      const saved = localStorage.getItem('PENA_TEACHER_PROFILE');
-      return saved ? JSON.parse(saved) : { name: 'Dr. Ahmad, M.Pd.', subject: 'Bahasa Indonesia / Kritis' };
-    } catch (e) {
-      return { name: 'Dr. Ahmad, M.Pd.', subject: 'Bahasa Indonesia / Kritis' };
-    }
-  });
-  const [tempTeacherName, setTempTeacherName] = useState('');
-  const [tempTeacherSubject, setTempTeacherSubject] = useState('');
-  const [showTeacherSetupModal, setShowTeacherSetupModal] = useState(false);
+  // State Identitas Sesi Guru & Mapel (Isolasi Database per Pihak)
+  const [teacherNameInput, setTeacherNameInput] = useState('');
+  const [subjectInput, setSubjectInput] = useState('');
+  const [currentTeacherSession, setCurrentTeacherSession] = useState(null);
 
   const [activeTab, setActiveTab] = useState('landing');
   const [apiKey, setApiKey] = useState('');
   const [selectedMode, setSelectedMode] = useState('mandiri');
 
-  // --- 2. SISTEM KELAS & LOGIN SISWA ---
-  const [students, setStudents] = useState(() => {
+  // Generator Kunci Unik Berdasarkan Guru dan Mapel (Supaya Data Tidak Silang)
+  const getStorageKeys = (session) => {
+    if (!session) return { students: 'PENA_DEFAULT_STUDENTS', submissions: 'PENA_DEFAULT_SUBMISSIONS' };
+    const safeKey = `${session.teacher}_${session.subject}`.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
+    return {
+      students: `PENA_${safeKey}_STUDENTS`,
+      submissions: `PENA_${safeKey}_SUBMISSIONS`
+    };
+  };
+
+  // --- 2. SISTEM KELAS & LOGIN SISWA (DINAMIS BERDASARKAN GURU & MAPEL) ---
+  const [students, setStudents] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
+
+  // Sinkronisasi data otomatis saat Sesi Guru / Mapel aktif berubah (Load data spesifik mapel)
+  useEffect(() => {
+    if (!currentTeacherSession) return;
+    const keys = getStorageKeys(currentTeacherSession);
     try {
-      const saved = localStorage.getItem('PENA_STUDENTS');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return Array.isArray(parsed) && parsed.length > 0 ? parsed : [
+      const savedStudents = localStorage.getItem(keys.students);
+      if (savedStudents) {
+        const parsed = JSON.parse(savedStudents);
+        setStudents(Array.isArray(parsed) ? parsed : []);
+      } else {
+        const defaultStudents = [
           { id: 1, name: 'Budi Santoso', pin: '1234' },
           { id: 2, name: 'Siti Rahma', pin: '5678' }
         ];
+        setStudents(defaultStudents);
+        localStorage.setItem(keys.students, JSON.stringify(defaultStudents));
       }
-    } catch (e) { console.error(e); }
-    return [
-      { id: 1, name: 'Budi Santoso', pin: '1234' },
-      { id: 2, name: 'Siti Rahma', pin: '5678' }
-    ];
-  });
+
+      const savedSubmissions = localStorage.getItem(keys.submissions);
+      if (savedSubmissions) {
+        const parsedSub = JSON.parse(savedSubmissions);
+        setSubmissions(Array.isArray(parsedSub) ? parsedSub : []);
+      } else {
+        setSubmissions([]);
+      }
+    } catch (e) { 
+      console.error(e); 
+    }
+  }, [currentTeacherSession]);
+
+  // Polling & Cross-Tab Sync agar HP Android/iPhone update real-time tanpa nyangkut cache iOS
+  useEffect(() => {
+    if (!currentTeacherSession) return;
+    const keys = getStorageKeys(currentTeacherSession);
+    const interval = setInterval(() => {
+      try {
+        const savedSub = localStorage.getItem(keys.submissions);
+        if (savedSub) {
+          const parsedSub = JSON.parse(savedSub);
+          if (Array.isArray(parsedSub)) {
+            setSubmissions(parsedSub);
+          }
+        }
+        const savedStu = localStorage.getItem(keys.students);
+        if (savedStu) {
+          const parsedStu = JSON.parse(savedStu);
+          if (Array.isArray(parsedStu)) {
+            setStudents(parsedStu);
+          }
+        }
+      } catch (err) { console.error("Polling sync error", err); }
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [currentTeacherSession]);
+
+  useEffect(() => {
+    if (!currentTeacherSession) return;
+    const keys = getStorageKeys(currentTeacherSession);
+    try {
+      localStorage.setItem(keys.submissions, JSON.stringify(submissions));
+      localStorage.setItem(keys.students, JSON.stringify(students));
+    } catch (e) {}
+  }, [submissions, students, currentTeacherSession]);
   
   const [currentStudent, setCurrentStudent] = useState(null);
   const [loginSelectedName, setLoginSelectedName] = useState('');
@@ -74,38 +127,7 @@ export default function App() {
     'Memeriksa Kembali': 'Jika ada pihak yang menentang kesimpulanmu, bagaimana pembelaanmu?'
   };
 
-  // --- 5. DATABASE SUBMISI ---
-  const [submissions, setSubmissions] = useState(() => {
-    try {
-      const saved = localStorage.getItem('PENA_SUBMISSIONS');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return Array.isArray(parsed) ? parsed : [];
-      }
-    } catch (e) { console.error(e); }
-    return [];
-  });
   const [activeSubmissionId, setActiveSubmissionId] = useState(null);
-
-  // Sinkronisasi Real-Time (Mengatasi delay di iOS / Android)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      try {
-        const savedSub = localStorage.getItem('PENA_SUBMISSIONS');
-        if (savedSub) {
-          const parsedSub = JSON.parse(savedSub);
-          if (Array.isArray(parsedSub)) setSubmissions(parsedSub);
-        }
-      } catch (err) { console.error(err); }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('PENA_SUBMISSIONS', JSON.stringify(submissions));
-    localStorage.setItem('PENA_STUDENTS', JSON.stringify(students));
-    localStorage.setItem('PENA_TEACHER_PROFILE', JSON.stringify(teacherProfile));
-  }, [submissions, students, teacherProfile]);
 
   useEffect(() => {
     if (activeTab !== 'workspace' || userRole !== 'siswa' || !currentStudent) return;
@@ -122,7 +144,7 @@ export default function App() {
 
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
-  const [showAccModal, setShowAccModal] = useState(false);
+  const [showAccModal, setShowAccModal] = useState(false); 
   const [targetSubmissionId, setTargetSubmissionId] = useState(null);
   const [teacherNoteInput, setTeacherNoteInput] = useState('');
 
@@ -130,30 +152,29 @@ export default function App() {
   const handleVerifyPinGuru = (e) => {
     e.preventDefault();
     if (pinInput === 'PENA2026' || pinInput === '1234') {
+      if (!teacherNameInput.trim() || !subjectInput.trim()) {
+        alert('❌ Harap isi Nama Guru dan Mata Pelajaran terlebih dahulu!');
+        return;
+      }
+      const session = { teacher: teacherNameInput.trim(), subject: subjectInput.trim() };
+      setCurrentTeacherSession(session);
+      setIsGuruAuthed(true);
+      setUserRole('guru');
       setShowPinModal(false);
       setPinInput('');
-      // Buka modal setup identitas guru terlebih dahulu (Poin 2)
-      setTempTeacherName(teacherProfile.name);
-      setTempTeacherSubject(teacherProfile.subject);
-      setShowTeacherSetupModal(true);
+      setActiveTab('guruDashboard');
     } else {
       alert('❌ PIN Guru Salah!');
       setPinInput('');
     }
   };
 
-  const handleSaveTeacherProfile = (e) => {
-    e.preventDefault();
-    const updated = { name: tempTeacherName, subject: tempTeacherSubject };
-    setTeacherProfile(updated);
-    setIsGuruAuthed(true);
-    setUserRole('guru');
-    setShowTeacherSetupModal(false);
-    setActiveTab('guruDashboard');
-  };
-
   const handleStudentLogin = (e) => {
     e.preventDefault();
+    if (!currentTeacherSession) {
+      alert('❌ Sesi guru/mapel belum diaktifkan di perangkat ini. Minta guru pengampu mapel untuk login terlebih dahulu agar database siswa termuat.');
+      return;
+    }
     const student = students.find(s => s.name === loginSelectedName && s.pin === loginPin);
     if (student) {
       setCurrentStudent(student);
@@ -178,7 +199,7 @@ export default function App() {
     const newPin = Math.floor(1000 + Math.random() * 9000).toString();
     setStudents([...students, { id: Date.now(), name: newStudentName, pin: newPin }]);
     setNewStudentName('');
-    alert(`Siswa ditambahkan. PIN: ${newPin}`);
+    alert(`Siswa ditambahkan ke mapel ${currentTeacherSession?.subject}. PIN: ${newPin}`);
   };
 
   const handleSaveApiKey = (e) => {
@@ -213,8 +234,8 @@ export default function App() {
       id: newId,
       certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}`,
       studentName: currentStudent?.name || 'Siswa',
-      teacherName: teacherProfile.name,
-      subjectName: teacherProfile.subject,
+      mapel: currentTeacherSession?.subject || 'Umum',
+      teacherName: currentTeacherSession?.teacher || 'Guru',
       mode: selectedMode === 'mandiri' ? 'Modus Mandiri (Privat)' : 'Modus Kelompok (Tugas Kelas)',
       naskahText: formData.naskahText,
       ennis: formData.ennisIndicator,
@@ -236,17 +257,6 @@ export default function App() {
     setActiveTab('portfolio');
   };
 
-  // POIN 1: SIMPAN DATA (DOWNLOAD JSON) DAN HAPUS BERSIH UNTUK PIHAK LAIN
-  const handleDownloadBackupData = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(submissions, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `Rekap_Tugas_PENA_${new Date().toISOString().slice(0,10)}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
-
   const handleClearMyDataAndLogout = () => {
     const confirmClear = window.confirm("PENTING: Apakah kamu SUDAH MENCETAK/MENGUNDUH PDF Sertifikatmu?\n\nJika klik OK, datamu akan dihapus total dari perangkat ini.");
     if (confirmClear) {
@@ -257,18 +267,19 @@ export default function App() {
     }
   };
 
-  const handleBackupAndResetSystem = () => {
-    if (submissions.length > 0) {
-      const wantBackup = window.confirm("Apakah Anda ingin MENGUNDUH (SIMPAN) rekap data tugas siswa terlebih dahulu sebelum sistem dibersihkan?");
-      if (wantBackup) {
-        handleDownloadBackupData();
-      }
-    }
-    const confirmReset = window.confirm("⚠️ PERINGATAN: Semua data tugas di dashboard akan dihapus bersih agar siap digunakan oleh guru / pihak sekolah lain. Lanjutkan?");
+  const handleResetEntireSystem = () => {
+    const confirmReset = window.confirm(`⚠️ PERINGATAN KERAS:\nTindakan ini akan menghapus SELURUH database lokal untuk mapel ${currentTeacherSession?.subject} (${currentTeacherSession?.teacher}) hingga bersih total!`);
     if (confirmReset) {
-      localStorage.removeItem('PENA_SUBMISSIONS');
+      const keys = getStorageKeys(currentTeacherSession);
+      localStorage.removeItem(keys.submissions);
+      localStorage.removeItem(keys.students);
       setSubmissions([]);
-      alert("🗑️ Dashboard berhasil dibersihkan total dan siap digunakan untuk sesi atau pihak lain!");
+      setStudents([
+        { id: 1, name: 'Budi Santoso', pin: '1234' },
+        { id: 2, name: 'Siti Rahma', pin: '5678' }
+      ]);
+      handleLogout();
+      alert("🗑️ Database mapel ini berhasil di-reset total ke setelan awal.");
     }
   };
 
@@ -285,7 +296,7 @@ export default function App() {
       setSelectedSubmission(prev => ({ ...prev, status: 'Disetujui Guru (ACC)', teacherFeedback: teacherNoteInput }));
     }
     setShowAccModal(false);
-    alert("✅ Tugas berhasil di-ACC!");
+    alert("✅ Tugas berhasil di-ACC beserta catatan kustom Anda!");
   };
 
   const handleSaveRevision = (e) => {
@@ -295,18 +306,28 @@ export default function App() {
       setSelectedSubmission(prev => ({ ...prev, status: 'Minta Revisi', teacherFeedback: teacherNoteInput }));
     }
     setShowRevisionModal(false);
-    alert("❌ Status diubah menjadi Minta Revisi.");
+    alert("❌ Status diubah menjadi Minta Revisi & Catatan terkirim.");
   };
 
   return (
     <div style={styles.appContainer}>
       <style dangerouslySetInnerHTML={{ __html: `
-        @page { size: A4 portrait; margin: 10mm; }
+        @page {
+          size: A4 portrait;
+          margin: 10mm;
+        }
         @media print {
           body * { visibility: hidden; }
           #certPrintArea, #certPrintArea * { visibility: visible; }
           #certPrintArea { 
-            position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; padding: 5mm; box-sizing: border-box; background: white !important;
+            position: fixed; 
+            left: 0; 
+            top: 0; 
+            width: 100vw; 
+            height: 100vh; 
+            padding: 5mm; 
+            box-sizing: border-box; 
+            background: white !important;
           }
           .no-print { display: none !important; }
         }
@@ -314,10 +335,7 @@ export default function App() {
 
       {/* HEADER GLOBAL */}
       <header style={styles.header} className="no-print">
-        <div>
-          <h2 style={styles.logoText}>PENA 🛡️</h2>
-          <span style={{fontSize: '10px', color: '#94a3b8'}}>v2.6 (iOS Safe & Multi-User)</span>
-        </div>
+        <h2 style={styles.logoText}>PENA 🛡️</h2>
         {userRole && (
           <button style={styles.cancelBtn} onClick={handleLogout}>🚪 Keluar Sistem</button>
         )}
@@ -336,13 +354,13 @@ export default function App() {
           <div style={{display: 'flex', gap: '20px', marginTop: '20px', flexWrap: 'wrap'}}>
             <div style={styles.roleCard} onClick={() => setActiveTab('loginSiswa')}>
               <h3 style={{margin: '0 0 10px 0'}}>🎓 Akses Siswa</h3>
-              <p style={{fontSize: '13px', color: '#475569'}}>Masuk menggunakan PIN dari Guru.</p>
+              <p style={{fontSize: '13px', color: '#475569'}}>Masuk menggunakan PIN yang diberikan oleh Guru.</p>
               <button style={{...styles.primaryBtn, marginTop: '15px'}}>Masuk sebagai Siswa</button>
             </div>
             <div style={styles.roleCard} onClick={() => setShowPinModal(true)}>
-              <h3 style={{margin: '0 0 10px 0'}}>👨‍🏫 Akses Guru / Pengajar</h3>
-              <p style={{fontSize: '13px', color: '#475569'}}>Atur identitas kelas dan evaluasi tugas.</p>
-              <button style={{...styles.guruActiveBtn, width: '100%', marginTop: '15px'}}>Masuk Dashboard Guru</button>
+              <h3 style={{margin: '0 0 10px 0'}}>👨‍🏫 Akses Guru</h3>
+              <p style={{fontSize: '13px', color: '#475569'}}>Masuk dengan Nama, Mapel & PIN untuk kelola kelas.</p>
+              <button style={{...styles.primaryBtn, backgroundColor: '#0f172a', width: '100%', marginTop: '15px'}}>Masuk Dashboard Guru</button>
             </div>
           </div>
         </div>
@@ -370,38 +388,29 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL PIN GURU */}
+      {/* MODAL PIN GURU & INPUT NAMA / MAPEL */}
       {showPinModal && (
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard}>
-            <h3>🔐 Otentikasi Guru</h3>
+            <h3>🔐 Otentikasi & Sesi Pengajar</h3>
+            <p style={{fontSize: '12px', color: '#64748b', marginBottom: '15px'}}>Masukkan identitas agar data roster dan tugas terisolasi per mata pelajaran.</p>
             <form onSubmit={handleVerifyPinGuru}>
-              <input type="password" placeholder="PIN Demo: PENA2026" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} autoFocus required />
-              <div style={{display: 'flex', gap: '10px'}}>
-                <button type="submit" style={styles.primaryBtn}>Lanjut ➔</button>
+              <div style={styles.formGroup}>
+                <label style={{fontSize: '13px', fontWeight: 'bold'}}>Nama Guru:</label>
+                <input type="text" placeholder="Contoh: Bu Siti, S.Pd" value={teacherNameInput} onChange={(e) => setTeacherNameInput(e.target.value)} style={styles.input} required />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={{fontSize: '13px', fontWeight: 'bold'}}>Mata Pelajaran:</label>
+                <input type="text" placeholder="Contoh: IPA / Bahasa Indonesia" value={subjectInput} onChange={(e) => setSubjectInput(e.target.value)} style={styles.input} required />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={{fontSize: '13px', fontWeight: 'bold'}}>PIN Admin Guru:</label>
+                <input type="password" placeholder="PIN Demo: PENA2026" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} required />
+              </div>
+              <div style={{display: 'flex', gap: '10px', marginTop: '15px'}}>
+                <button type="submit" style={styles.primaryBtn}>Masuk 🔑</button>
                 <button type="button" style={styles.cancelBtn} onClick={() => {setShowPinModal(false); setActiveTab('landing');}}>Batal</button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL SETUP NAMA GURU & MAPEL (Poin 2) */}
-      {showTeacherSetupModal && (
-        <div style={styles.modalOverlay} className="no-print">
-          <div style={styles.modalCard}>
-            <h3>⚙️ Identitas Pengajar & Mata Pelajaran</h3>
-            <p style={{fontSize: '12px', color: '#64748b'}}>Nama dan mapel ini akan otomatis tercantum di sertifikat seluruh siswa.</p>
-            <form onSubmit={handleSaveTeacherProfile}>
-              <div style={styles.formGroup}>
-                <label style={{fontSize: '13px', fontWeight: 'bold'}}>Nama Guru / Pengajar:</label>
-                <input type="text" value={tempTeacherName} onChange={(e) => setTempTeacherName(e.target.value)} placeholder="Contoh: Budi Santoso, S.Pd." style={styles.input} required />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={{fontSize: '13px', fontWeight: 'bold'}}>Mata Pelajaran / Sesi:</label>
-                <input type="text" value={tempTeacherSubject} onChange={(e) => setTempTeacherSubject(e.target.value)} placeholder="Contoh: Bahasa Indonesia Kelas 12" style={styles.input} required />
-              </div>
-              <button type="submit" style={styles.primaryBtn}>Masuk Dashboard 🚀</button>
             </form>
           </div>
         </div>
@@ -420,6 +429,9 @@ export default function App() {
           )}
           {userRole === 'guru' && (
             <>
+              <div style={{backgroundColor: '#e2e8f0', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', color: '#1e293b', display: 'flex', alignItems: 'center'}}>
+                📚 {currentTeacherSession?.teacher} | {currentTeacherSession?.subject}
+              </div>
               <button style={activeTab === 'guruDashboard' ? styles.navBtnActive : styles.navBtn} onClick={() => setActiveTab('guruDashboard')}>📊 Evaluasi Tugas</button>
               <button style={activeTab === 'guruSiswa' ? styles.navBtnActive : styles.navBtn} onClick={() => setActiveTab('guruSiswa')}>👥 Kelola Daftar Siswa</button>
             </>
@@ -436,12 +448,12 @@ export default function App() {
               <div style={styles.card} className="no-print">
                 <h2 style={{color: '#0f172a'}}>Halo, {currentStudent.name}! 👋</h2>
                 <div style={styles.introBox}>
-                  <h4>Pengajar Sesi Ini: <b>{teacherProfile.name}</b> ({teacherProfile.subject})</h4>
+                  <h4>Tahapan Pengerjaan Mapel {currentTeacherSession?.subject}:</h4>
                   <ol style={{lineHeight: '1.6', marginTop: '10px'}}>
-                    <li><b>Siapkan Naskah:</b> Tulis opini/karya tulismu secara manual.</li>
-                    <li><b>Hubungkan AI:</b> Masukkan API Key Google AI.</li>
-                    <li><b>Uji Nalar:</b> Dekonstruksi logikanya. Hati-hati, sistem mengawasi perpindahan tab!</li>
-                    <li><b>Portofolio:</b> Cetak PDF sertifikatmu.</li>
+                    <li><b>Siapkan Naskah (Pilar 1):</b> Tulis opini/karya tulismu secara manual.</li>
+                    <li><b>Hubungkan AI (Tab 2):</b> Masukkan API Key Google AI.</li>
+                    <li><b>Uji Nalar (Tab 3):</b> Dekonstruksi logikanya. Hati-hati, sistem mengawasi perpindahan tab!</li>
+                    <li><b>Portofolio (Tab 4):</b> Cetak PDF sertifikatmu.</li>
                   </ol>
                 </div>
                 <button style={styles.primaryBtn} onClick={() => setActiveTab('apiKey')}>Lanjut ke Setup AI ➔</button>
@@ -461,7 +473,7 @@ export default function App() {
                 </div>
                 <form onSubmit={handleSaveApiKey}>
                   <label style={{fontSize: '13px', fontWeight: 'bold'}}>Google AI API Key:</label>
-                  <input type="password" placeholder="Paste kode API Key..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} required />
+                  <input type="password" placeholder="Paste kode API Key milikmu..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} required />
                   <button type="submit" style={styles.primaryBtn}>Validasi & Aktifkan 🔑</button>
                 </form>
               </div>
@@ -538,7 +550,7 @@ export default function App() {
                       <div style={styles.certBody}>
                         <p style={{margin: '2px 0'}}>Diterbitkan atas nama:</p>
                         <h2 style={styles.studentNameTitle}>{activePortfolio.studentName}</h2>
-                        <p style={{fontSize: '11px', margin: '2px 0'}}>Mata Pelajaran: <b>{activePortfolio.subjectName || teacherProfile.subject}</b> | {activePortfolio.timestamp}</p>
+                        <p style={{fontSize: '11px', margin: '2px 0'}}>Mata Pelajaran: <b>{currentTeacherSession?.subject}</b> | Pengerjaan: <b>{activePortfolio.mode}</b> | {activePortfolio.timestamp}</p>
 
                         <div style={styles.statusBox}>
                           STATUS VALIDASI: 
@@ -571,7 +583,7 @@ export default function App() {
 
                         {activePortfolio.teacherFeedback && (
                           <div style={styles.teacherFeedbackCert}>
-                            <b>👨‍🏫 Catatan Guru ({activePortfolio.teacherName || teacherProfile.name}):</b> <p style={{margin: '2px 0'}}>"{activePortfolio.teacherFeedback}"</p>
+                            <b>👨‍🏫 Catatan Guru ({currentTeacherSession?.teacher}):</b> <p style={{margin: '2px 0'}}>"{activePortfolio.teacherFeedback}"</p>
                           </div>
                         )}
 
@@ -580,10 +592,12 @@ export default function App() {
                             <p style={{fontSize: '10px', color: '#64748b', margin: 0}}>Terverifikasi Sistem PENA</p>
                             <div style={styles.digitalSeal}>VALIDASI</div>
                           </div>
-                          <div style={{textAlign: 'right'}}>
-                            <p style={{fontSize: '10px', color: '#64748b', margin: 0}}>Pengajar / Guru</p>
-                            <p style={{marginTop: '15px', fontWeight: 'bold', fontSize: '11px', margin: 0}}>{activePortfolio.teacherName || teacherProfile.name}</p>
-                          </div>
+                          {(activePortfolio.mode || '').includes('Kelompok') && (
+                            <div style={{textAlign: 'right'}}>
+                              <p style={{fontSize: '10px', color: '#64748b', margin: 0}}>Guru: {currentTeacherSession?.teacher}</p>
+                              <p style={{marginTop: '15px', fontWeight: 'bold', fontSize: '11px', margin: 0}}>(___________________)</p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -599,7 +613,7 @@ export default function App() {
           <>
             {activeTab === 'guruSiswa' && (
               <div style={styles.card} className="no-print">
-                <h2>👥 Kelola Roster Kelas ({teacherProfile.subject})</h2>
+                <h2>👥 Kelola Roster Kelas ({currentTeacherSession?.subject})</h2>
                 <form onSubmit={handleAddStudent} style={{display: 'flex', gap: '10px', marginBottom: '20px'}}>
                   <input type="text" placeholder="Nama siswa baru..." value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} style={{...styles.input, margin: 0, flex: 1}} required />
                   <button type="submit" style={{...styles.primaryBtn, margin: 0, flex: 'none', width: 'auto'}}>+ Tambah Siswa</button>
@@ -626,18 +640,11 @@ export default function App() {
             {activeTab === 'guruDashboard' && (
               <div style={styles.card} className="no-print">
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px'}}>
-                  <div>
-                    <h2 style={{margin: 0}}>📊 Evaluasi Tugas Naskah</h2>
-                    <p style={{fontSize: '12px', color: '#475569', margin: '4px 0 0 0'}}>Pengajar: <b>{teacherProfile.name}</b> | Mapel: <b>{teacherProfile.subject}</b></p>
-                  </div>
-                  {/* POIN 1: TOMBOL DOWNLOAD BACKUP & RESET BERSIH */}
-                  <div style={{display: 'flex', gap: '8px'}}>
-                    <button style={styles.downloadBtn} onClick={handleDownloadBackupData}>📥 Simpan Rekap (JSON)</button>
-                    <button style={styles.dangerBtn} onClick={handleBackupAndResetSystem}>🗑️ Bersihkan & Reset Sesi</button>
-                  </div>
+                  <h2>📊 Evaluasi Tugas: {currentTeacherSession?.subject} ({currentTeacherSession?.teacher})</h2>
+                  <button style={styles.dangerBtn} onClick={handleResetEntireSystem}>⚠️ Reset Database Mapel Ini</button>
                 </div>
 
-                {(!submissions || submissions.length === 0) ? <p style={{marginTop: '20px'}}>Belum ada tugas masuk.</p> : (
+                {(!submissions || submissions.length === 0) ? <p style={{marginTop: '20px'}}>Belum ada tugas masuk untuk mapel ini.</p> : (
                   <div style={{overflowX: 'auto'}}>
                     <table style={styles.table}>
                       <thead>
@@ -670,7 +677,7 @@ export default function App() {
               <div style={styles.modalOverlay} className="no-print">
                 <div style={styles.largeModalCard}>
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                    <h3>📝 Evaluasi: {selectedSubmission.studentName}</h3>
+                    <h3>📝 Evaluasi Naskah: {selectedSubmission.studentName}</h3>
                     <button style={styles.closeBtn} onClick={() => setSelectedSubmission(null)}>✖ Close</button>
                   </div>
                   <hr />
@@ -691,11 +698,10 @@ export default function App() {
               </div>
             )}
 
-            {/* MODAL CATATAN ACC */}
             {showAccModal && (
               <div style={styles.modalOverlay} className="no-print">
                 <div style={styles.modalCard}>
-                  <h3>✅ Catatan ACC dari {teacherProfile.name}</h3>
+                  <h3>✅ Catatan ACC dari {currentTeacherSession?.teacher}</h3>
                   <form onSubmit={handleSaveAccWithNote}>
                     <textarea rows="4" value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={styles.textarea} required />
                     <div style={{display: 'flex', gap: '10px', marginTop: '10px'}}>
@@ -728,7 +734,7 @@ export default function App() {
   );
 }
 
-// --- STYLING CSS ---
+// --- STYLING CSS (A4 PRESISI) ---
 const styles = {
   appContainer: { fontFamily: 'Inter, sans-serif', maxWidth: '850px', margin: '20px auto', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '10px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', color: 'white', padding: '15px 20px', borderRadius: '8px' },
@@ -752,7 +758,6 @@ const styles = {
   primaryBtn: { backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '12px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', width: '100%', fontSize: '14px' },
   printBtn: { backgroundColor: '#0284c7', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', flex: 1 },
   clearBtn: { backgroundColor: '#dc2626', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', flex: 1 },
-  downloadBtn: { backgroundColor: '#16a34a', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' },
   dangerBtn: { backgroundColor: '#991b1b', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' },
   
   formGroup: { marginBottom: '15px' },
