@@ -148,7 +148,7 @@ export default function App() {
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'classes'), (snap) => {
       const cls = [];
-      snap.forEach(d => push({ id: d.id, ...d.data() }));
+      snap.forEach(d => cls.push({ id: d.id, ...d.data() })); // BUG FIX: cls.push
       setAllClasses(cls);
     });
     return () => unsub();
@@ -339,7 +339,7 @@ Analisis Aspek Polya Siswa: "${formData.polyaText}"
 
 Instruksi Evaluasi:
 1. Bedah korelasi argumen siswa dengan kutipan naskah awal. Jangan merangkum, tapi evaluasi kedalamannya.
-​2. Nilai pemahaman masalah, asumsi tersembunyi, dan eksekusi solusinya.
+2. Nilai pemahaman masalah, asumsi tersembunyi, dan eksekusi solusinya.
 3. Berikan diagnosis evaluatif (maksimal 2 paragraf padat). Jelaskan spesifik apa yang sudah logis dan apa yang masih perlu diperbaiki.`;
         
         const aiResponse = await callGeminiAPI(prompt, activeKeyToUse, 3);
@@ -739,7 +739,7 @@ Instruksi Evaluasi:
                 <div style={styles.card}>
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px'}}>
                     <h2 style={{margin: 0}}>Dasbor Penilaian Karya</h2>
-                    <div className="no-print" style={{display: 'flex', gap: '10px'}}>
+                    <div className="no-print" style={{display: 'flex', flexWrap: 'wrap', gap: '10px'}}>
                       <button style={{...styles.btnPrimary, background: '#16a34a', padding: '10px 15px', width: 'auto'}} onClick={handleExportCSV}>📥 Ekspor Laporan CSV</button>
                       <button style={styles.btnSecondary} onClick={() => window.print()}>🖨️ Cetak</button>
                     </div>
@@ -766,7 +766,7 @@ Instruksi Evaluasi:
                               </td>
                               <td style={{padding: '15px 10px', fontWeight: '600', color: sub.status.includes('Ditolak') ? '#dc2626' : '#334155'}}>{sub.status}</td>
                               <td style={{padding: '15px 10px', textAlign: 'right'}} className="no-print">
-                                <div style={{display: 'flex', gap: '8px', justifyContent: 'flex-end'}}>
+                                <div style={{display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap'}}>
                                   <button style={styles.btnTable} onClick={() => setSelectedSubmission(sub)}>Tinjau Naskah</button>
                                   <button style={{...styles.btnTable, background: '#fee2e2', color: '#b91c1c'}} onClick={() => handleDeleteSubmission(sub.id)}>Hapus</button>
                                 </div>
@@ -784,21 +784,21 @@ Instruksi Evaluasi:
             {activeTab === 'guruSiswa' && (
               <div style={styles.card} className="no-print">
                 <h2>Otoritas Peserta Uji</h2>
-                <div style={{background: '#f8fafc', padding: '18px', borderRadius: '8px', fontSize: '14.5px', marginBottom: '25px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.02)'}}>
+                <div style={{background: '#f8fafc', padding: '18px', borderRadius: '8px', fontSize: '14px', marginBottom: '25px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.02)', overflowWrap: 'break-word'}}>
                   🔑 <b>KODE AKSES KELAS: <span style={{fontSize: '20px', color: '#b91c1c', letterSpacing: '2px'}}>{currentClass?.classCode}</span></b><br/><br/>
                   <span style={{color: '#475569'}}>Berikan kode di atas kepada siswa. Daftarkan nama siswa di bawah ini untuk menghasilkan PIN unik mereka.</span>
                 </div>
                 
-                <form onSubmit={handleAddStudent} style={{display: 'flex', gap: '10px', marginBottom: '25px'}}>
-                  <input name="sName" type="text" placeholder="Masukkan nama lengkap siswa..." style={{...styles.input, margin: 0, flex: 1}} required autoComplete="off" />
-                  <button type="submit" style={{...styles.btnPrimary, width: 'auto', margin: 0, padding: '0 25px'}}>Daftarkan Peserta</button>
+                <form onSubmit={handleAddStudent} style={{display: 'flex', gap: '10px', marginBottom: '25px', flexWrap: 'wrap'}}>
+                  <input name="sName" type="text" placeholder="Masukkan nama lengkap siswa..." style={{...styles.input, margin: 0, flex: '1 1 200px'}} required autoComplete="off" />
+                  <button type="submit" style={{...styles.btnPrimary, flex: '1 1 auto', margin: 0, padding: '14px 25px'}}>Daftarkan Peserta</button>
                 </form>
                 
                 <ul style={{paddingLeft: 0, listStyle: 'none', fontSize: '14px', color: '#334155'}}>
                   {students.map(s => (
-                    <li key={s.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 12px', borderBottom: '1px solid #f1f5f9', background: '#fafafa', borderRadius: '6px', marginBottom: '8px'}}>
-                      <span><b>{s.name}</b> <span style={{margin: '0 10px', color: '#cbd5e1'}}>|</span> PIN Autentikasi: <span style={{color: '#dc2626', fontWeight: '900', letterSpacing: '1px'}}>{s.pin}</span></span>
-                      <button style={{background: 'none', border: 'none', color: '#b91c1c', cursor: 'pointer', fontWeight: '700', padding: '5px 10px', borderRadius: '4px'}} onClick={() => handleRemoveStudent(s.id)}>Cabut Akses</button>
+                    <li key={s.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 12px', borderBottom: '1px solid #f1f5f9', background: '#fafafa', borderRadius: '6px', marginBottom: '8px', flexWrap: 'wrap', gap: '10px'}}>
+                      <span><b>{s.name}</b> <span style={{margin: '0 10px', color: '#cbd5e1'}}>|</span> PIN: <span style={{color: '#dc2626', fontWeight: '900', letterSpacing: '1px'}}>{s.pin}</span></span>
+                      <button style={{background: '#fee2e2', border: 'none', color: '#b91c1c', cursor: 'pointer', fontWeight: '700', padding: '8px 12px', borderRadius: '6px', fontSize: '12.5px'}} onClick={() => handleRemoveStudent(s.id)}>Cabut Akses</button>
                     </li>
                   ))}
                 </ul>
@@ -823,14 +823,14 @@ Instruksi Evaluasi:
                     </div>
                     
                     <p style={{color: '#475569', margin: '0 0 5px 0'}}><b>Kutipan Kasus:</b></p>
-                    <p style={{background: '#fff', padding: '12px', borderRadius: '6px', fontStyle: 'italic', border: '1px solid #e2e8f0', margin: '0 0 20px 0'}}>"{selectedSubmission.naskahText}"</p>
+                    <p style={{background: '#fff', padding: '12px', borderRadius: '6px', fontStyle: 'italic', border: '1px solid #e2e8f0', margin: '0 0 20px 0', overflowWrap: 'break-word'}}>"{selectedSubmission.naskahText}"</p>
                     
                     <p style={{color: '#475569', margin: '0 0 5px 0'}}><b>Argumen Dekonstruksi Terpadu:</b></p>
-                    <div style={{whiteSpace: 'pre-wrap', color: '#1e293b', background: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', lineHeight: '1.6'}}>{selectedSubmission.deconstructionText}</div>
+                    <div style={{whiteSpace: 'pre-wrap', color: '#1e293b', background: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', lineHeight: '1.6', overflowWrap: 'break-word'}}>{selectedSubmission.deconstructionText}</div>
                     
                     <div style={{background: selectedSubmission.diagnosis.includes('MANUAL') ? '#fefce8' : '#f0fdf4', padding: '15px', borderLeft: `4px solid ${selectedSubmission.diagnosis.includes('MANUAL') ? '#eab308' : '#16a34a'}`, marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
                       <p style={{margin: '0 0 5px 0', color: selectedSubmission.diagnosis.includes('MANUAL') ? '#854d0e' : '#166534'}}><b>🤖 Laporan Evaluasi AI Pendidik:</b></p>
-                      <span style={{color: selectedSubmission.diagnosis.includes('MANUAL') ? '#713f12' : '#14532d', lineHeight: '1.6'}}>{selectedSubmission.diagnosis.replace('[HASIL EVALUASI AI] ', '')}</span>
+                      <span style={{color: selectedSubmission.diagnosis.includes('MANUAL') ? '#713f12' : '#14532d', lineHeight: '1.6', display: 'block', overflowWrap: 'break-word'}}>{selectedSubmission.diagnosis.replace('[HASIL EVALUASI AI] ', '')}</span>
                     </div>
                   </div>
                   
@@ -838,8 +838,8 @@ Instruksi Evaluasi:
                   <textarea rows="3" placeholder="Sampaikan keputusan final Anda secara komprehensif..." value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={{...styles.textarea, marginTop: '8px', marginBottom: '20px'}} />
                   
                   <div style={styles.modalActions}>
-                    <button style={{...styles.btnPrimary, flex: 1, background: '#16a34a'}} onClick={() => handleTeacherAction(selectedSubmission.id, 'Disetujui Otoritas (ACC)')}>ACC (Lolos Orisinalitas)</button>
-                    <button style={{...styles.btnDanger, flex: 1}} onClick={() => handleTeacherAction(selectedSubmission.id, 'Karya Ditolak / Revisi')}>Kunci Dibuka (Minta Revisi)</button>
+                    <button style={{...styles.btnPrimary, flex: '1 1 200px', background: '#16a34a'}} onClick={() => handleTeacherAction(selectedSubmission.id, 'Disetujui Otoritas (ACC)')}>ACC (Lolos Orisinalitas)</button>
+                    <button style={{...styles.btnDanger, flex: '1 1 200px'}} onClick={() => handleTeacherAction(selectedSubmission.id, 'Karya Ditolak / Revisi')}>Kunci Dibuka (Minta Revisi)</button>
                   </div>
                   <button style={{...styles.textBtn, width: '100%', marginTop: '10px'}} onClick={() => setSelectedSubmission(null)}>Batal & Tutup Dokumen</button>
                 </div>
@@ -853,36 +853,36 @@ Instruksi Evaluasi:
 }
 
 const styles = {
-  appContainer: { fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', maxWidth: '850px', margin: '30px auto', padding: '20px', color: '#0f172a' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #f1f5f9', paddingBottom: '15px', marginBottom: '25px' },
+  appContainer: { fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', maxWidth: '850px', width: '100%', boxSizing: 'border-box', margin: '30px auto', padding: '20px', color: '#0f172a' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #f1f5f9', paddingBottom: '15px', marginBottom: '25px', flexWrap: 'wrap', gap: '10px' },
   logoText: { margin: 0, fontSize: '22px', fontWeight: '900', letterSpacing: '0.5px', color: '#0f172a' },
-  card: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '35px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.03)' },
-  title: { fontSize: '30px', fontWeight: '900', marginBottom: '12px', textAlign: 'center', color: '#0f172a' },
-  subtitle: { fontSize: '15.5px', color: '#475569', textAlign: 'center', marginBottom: '35px', lineHeight: '1.6' },
-  introBox: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '20px', marginBottom: '25px', fontSize: '14.5px' },
-  gridMenu: { display: 'flex', gap: '20px' },
-  menuBox: { flex: 1, border: '1px solid #e2e8f0', borderRadius: '10px', padding: '25px 20px', cursor: 'pointer', textAlign: 'center', background: '#fff', transition: 'all 0.2s', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)' },
+  card: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '5%', boxSizing: 'border-box', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.03)' },
+  title: { fontSize: '26px', fontWeight: '900', marginBottom: '12px', textAlign: 'center', color: '#0f172a' },
+  subtitle: { fontSize: '14.5px', color: '#475569', textAlign: 'center', marginBottom: '35px', lineHeight: '1.6' },
+  introBox: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '20px', marginBottom: '25px', fontSize: '14px', overflowWrap: 'break-word' },
+  gridMenu: { display: 'flex', gap: '20px', flexWrap: 'wrap' },
+  menuBox: { flex: '1 1 230px', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '25px 20px', cursor: 'pointer', textAlign: 'center', background: '#fff', transition: 'all 0.2s', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', boxSizing: 'border-box' },
   form: { display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '10px' },
-  input: { width: '100%', padding: '14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14.5px', boxSizing: 'border-box', outline: 'none' },
-  textarea: { width: '100%', padding: '14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14.5px', boxSizing: 'border-box', resize: 'vertical', outline: 'none', lineHeight: '1.5' },
-  btnPrimary: { background: '#0f172a', color: '#fff', border: 'none', padding: '15px', borderRadius: '8px', fontWeight: '700', cursor: 'pointer', width: '100%', fontSize: '15px', transition: 'all 0.2s' },
+  input: { width: '100%', padding: '14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box', outline: 'none' },
+  textarea: { width: '100%', padding: '14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box', resize: 'vertical', outline: 'none', lineHeight: '1.5' },
+  btnPrimary: { background: '#0f172a', color: '#fff', border: 'none', padding: '15px', borderRadius: '8px', fontWeight: '700', cursor: 'pointer', width: '100%', fontSize: '15px', transition: 'all 0.2s', boxSizing: 'border-box' },
   btnSecondary: { background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', padding: '10px 18px', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '14px' },
-  btnDanger: { background: '#dc2626', color: '#fff', border: 'none', padding: '15px', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '15px' },
-  btnTable: { background: '#0f172a', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
-  textBtn: { background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: '14.5px', textDecoration: 'underline', padding: '10px', fontWeight: '600' },
+  btnDanger: { background: '#dc2626', color: '#fff', border: 'none', padding: '15px', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '15px', boxSizing: 'border-box' },
+  btnTable: { background: '#0f172a', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap' },
+  textBtn: { background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: '14px', textDecoration: 'underline', padding: '10px', fontWeight: '600' },
   backBtn: { background: 'none', border: 'none', color: '#0f172a', cursor: 'pointer', fontSize: '14px', marginBottom: '20px', padding: 0, fontWeight: '800' },
-  navBar: { display: 'flex', gap: '12px', marginBottom: '25px', alignItems: 'center', flexWrap: 'wrap' },
-  navBadge: { background: '#e2e8f0', padding: '10px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: '800', color: '#0f172a' },
-  navBtn: { background: '#fff', border: '1px solid #cbd5e1', padding: '10px 18px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer', color: '#334155', fontWeight: '600', transition: 'all 0.2s' },
-  navActive: { background: '#0f172a', color: '#fff', border: '1px solid #0f172a', padding: '10px 18px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer', fontWeight: '700' },
+  navBar: { display: 'flex', gap: '10px', marginBottom: '25px', alignItems: 'center', flexWrap: 'wrap' },
+  navBadge: { background: '#e2e8f0', padding: '10px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'inline-block' },
+  navBtn: { background: '#fff', border: '1px solid #cbd5e1', padding: '10px 18px', borderRadius: '8px', fontSize: '13px', cursor: 'pointer', color: '#334155', fontWeight: '600', flex: '1 1 auto', textAlign: 'center', boxSizing: 'border-box' },
+  navActive: { background: '#0f172a', color: '#fff', border: '1px solid #0f172a', padding: '10px 18px', borderRadius: '8px', fontSize: '13px', cursor: 'pointer', fontWeight: '700', flex: '1 1 auto', textAlign: 'center', boxSizing: 'border-box' },
   navDisabled: { background: '#f1f5f9', border: '1px solid #e2e8f0', padding: '10px 18px', borderRadius: '8px', fontSize: '14px', cursor: 'not-allowed', color: '#94a3b8', fontWeight: '600' },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 999 },
-  modalCard: { background: '#fff', padding: '35px', borderRadius: '12px', width: '380px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' },
-  modalCardLarge: { background: '#fff', padding: '35px', borderRadius: '12px', width: '600px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' },
-  modalActions: { display: 'flex', gap: '12px', marginTop: '25px', alignItems: 'center' },
-  monitor: { background: '#f8fafc', border: '1px solid #e2e8f0', padding: '15px 20px', fontSize: '13.5px', display: 'flex', justifyContent: 'space-between', marginBottom: '25px', borderRadius: '8px' },
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 999, padding: '20px', boxSizing: 'border-box' },
+  modalCard: { background: '#fff', padding: '35px 25px', borderRadius: '12px', width: '100%', maxWidth: '380px', boxSizing: 'border-box', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' },
+  modalCardLarge: { background: '#fff', padding: '35px 25px', borderRadius: '12px', width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' },
+  modalActions: { display: 'flex', gap: '12px', marginTop: '25px', alignItems: 'center', flexWrap: 'wrap' },
+  monitor: { background: '#f8fafc', border: '1px solid #e2e8f0', padding: '15px', fontSize: '13px', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '25px', borderRadius: '8px' },
   promptBox: { background: '#f8fafc', borderLeft: '4px solid #0f172a', padding: '18px', margin: '20px 0', borderRadius: '0 8px 8px 0' },
-  certBox: { border: '1px solid #e2e8f0', padding: '40px', background: '#fff', borderRadius: '10px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px', marginTop: '20px' },
+  certBox: { border: '1px solid #e2e8f0', padding: '5%', background: '#fff', borderRadius: '10px', boxSizing: 'border-box', overflowWrap: 'break-word' },
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginTop: '10px', minWidth: '500px' },
   main: { marginTop: '25px' }
 };
