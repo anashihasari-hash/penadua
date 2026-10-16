@@ -5,6 +5,7 @@ import React, { useState, useEffect } from 'react';
 // ==========================================
 const session = {
   set: (key, val) => {
+    // Cegah React nulis string "null" atau "undefined" ke memori
     if (val === null || val === undefined || val === 'null') {
       localStorage.removeItem(key);
     } else {
@@ -14,6 +15,7 @@ const session = {
   get: (key, fallback) => {
     try { 
       const item = localStorage.getItem(key); 
+      // Amankan dari ghost cache
       if (!item || item === 'null' || item === 'undefined') return fallback;
       const parsed = JSON.parse(item);
       return parsed !== null ? parsed : fallback;
@@ -28,7 +30,7 @@ const MASTER_ADMIN_PASSWORD = "adminpena";
 const GEMINI_MODEL = "gemini-3.8-flash"; // AI SAKTI TERBUKTI JALAN
 
 // ==========================================
-// 🧠 OTAK AI SAKTI
+// 🧠 OTAK AI SAKTI (TIDAK DISENTUH)
 // ==========================================
 const callGeminiAPI = async (prompt, apiKey, retries = 3) => {
   if (!apiKey || !apiKey.trim()) throw new Error("API Key belum dimasukkan!");
@@ -95,10 +97,12 @@ export default function App() {
 
   // 🛡️ AUTO-HEALING SYSTEM (MENCEGAH MURID NYASAR KE TAB GURU)
   useEffect(() => {
+    // Jika state rusak (Role Siswa tapi Data Siswa Hilang), logout paksa agar tidak blank
     if ((userRole === 'siswa' || userRole === 'mandiri') && !currentStudent) {
         handleLogout();
         return;
     }
+    // Jika murid refresh dan nyasar ke tab Guru, tendang balik ke tab siswa
     if (userRole === 'siswa' || userRole === 'mandiri') {
         if (activeTab === 'guruDashboard' || activeTab === 'guruSiswa') {
             setActiveTab('introSiswa');
@@ -144,7 +148,7 @@ export default function App() {
   const [students, setStudents] = useState([]);
   const [submissions, setSubmissions] = useState([]);
 
-  // 🛡️ SAFE ARRAY (ANTI-CRASH UNTUK DATA KOSONG)
+  // 🛡️ SAFE ARRAY (ANTI-CRASH)
   const safeSubmissions = Array.isArray(submissions) ? submissions : [];
   const safeStudents = Array.isArray(students) ? students : [];
 
@@ -204,8 +208,7 @@ export default function App() {
 
   const handleVerifyClassCode = (e) => {
     e.preventDefault();
-    // 🛡️ ANTI-CRASH OPTIONAL CHAINING (?.)
-    const foundClass = allClasses.find(c => c?.classCode === classCodeInput.trim() || c?.pin === classCodeInput.trim());
+    const foundClass = allClasses.find(c => c.classCode === classCodeInput.trim() || c.pin === classCodeInput.trim());
     if (foundClass) {
       setCurrentClass(foundClass);
       alert(`✅ Kelas ${foundClass.subject} (${foundClass.teacher}) ditemukan!`);
@@ -227,7 +230,6 @@ export default function App() {
       if (Array.isArray(parsed)) freshStudentList = parsed;
     } catch(err) {}
 
-    // 🛡️ ANTI-CRASH OPTIONAL CHAINING (?.)
     const student = freshStudentList.find(s => s?.name?.trim().toLowerCase() === inputName && s?.pin === loginStudentPin.trim());
     
     if (student) {
@@ -257,8 +259,7 @@ export default function App() {
     const sName = subjectInput.trim();
     const pin = pinInput.trim();
     
-    // 🛡️ ANTI-CRASH OPTIONAL CHAINING (?.)
-    let targetClass = allClasses.find(c => c?.teacher?.toLowerCase() === tName.toLowerCase() && c?.subject?.toLowerCase() === sName.toLowerCase());
+    let targetClass = allClasses.find(c => c.teacher.toLowerCase() === tName.toLowerCase() && c.subject.toLowerCase() === sName.toLowerCase());
     if (targetClass) { if (targetClass.pin !== pin) { alert('❌ Sandi (PIN) guru salah!'); return; } } 
     else {
       const classCode = Math.floor(10000 + Math.random() * 90000).toString();
@@ -277,8 +278,7 @@ export default function App() {
     if(window.confirm('🚨 Hapus paksa histori kelas ini?')) {
       const tName = teacherNameInput.trim().toLowerCase();
       const sName = subjectInput.trim().toLowerCase();
-      // 🛡️ ANTI-CRASH OPTIONAL CHAINING (?.)
-      const updatedClasses = allClasses.filter(c => !(c?.teacher?.toLowerCase() === tName && c?.subject?.toLowerCase() === sName));
+      const updatedClasses = allClasses.filter(c => !(c.teacher.toLowerCase() === tName && c.subject.toLowerCase() === sName));
       setAllClasses(updatedClasses);
       localStorage.setItem('PENA_ALL_CLASSES', JSON.stringify(updatedClasses));
       alert('Histori dibersihkan.');
@@ -321,11 +321,11 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [activeTab, currentStudent]);
 
-  // 🛡️ PROTEKSI TAB PORTOFOLIO DARI GHOST DATA
+  // Gunakan safeSubmissions untuk mencegah crash
   const activeSubmissionId = safeSubmissions.find(s => s?.studentName === currentStudent?.name)?.id;
   const activePortfolio = safeSubmissions.find(s => s?.id === activeSubmissionId);
   
-  const isWorkspaceLocked = activePortfolio && activePortfolio?.status !== 'Karya Ditolak / Revisi';
+  const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Karya Ditolak / Revisi';
   const isWorkspaceAllowed = isApiValid || isBypassAI; 
 
   const checkApiValidity = async (e) => {
@@ -398,7 +398,7 @@ export default function App() {
       teacherFeedback: ''
     };
     
-    const updatedSubmissions = [newSubmission, ...safeSubmissions.filter(s => s?.studentName !== currentStudent.name)];
+    const updatedSubmissions = [newSubmission, ...safeSubmissions.filter(s => s.studentName !== currentStudent.name)];
     setSubmissions(updatedSubmissions);
     
     const keys = getStorageKeys(currentClass, userRole);
@@ -412,7 +412,7 @@ export default function App() {
   const [teacherNoteInput, setTeacherNoteInput] = useState('');
 
   const handleTeacherAction = (id, status) => {
-    const updatedSubmissions = safeSubmissions.map(item => item?.id === id ? { ...item, status, teacherFeedback: teacherNoteInput } : item);
+    const updatedSubmissions = safeSubmissions.map(item => item.id === id ? { ...item, status, teacherFeedback: teacherNoteInput } : item);
     setSubmissions(updatedSubmissions);
     const keys = getStorageKeys(currentClass, userRole);
     localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
@@ -421,28 +421,27 @@ export default function App() {
 
   const handleDeleteSubmission = (id) => {
     if(window.confirm('Yakin ingin menghapus hasil evaluasi siswa ini? Siswa harus mengulang tugasnya dari awal.')){
-      const updatedSubmissions = safeSubmissions.filter(item => item?.id !== id);
+      const updatedSubmissions = safeSubmissions.filter(item => item.id !== id);
       setSubmissions(updatedSubmissions);
       const keys = getStorageKeys(currentClass, userRole);
       localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
     }
   };
 
-  // 🛡️ ANTI CRASH SAAT EXPORT DATA LAMA
   const handleExportCSV = () => {
     if(safeSubmissions.length === 0) { alert("Tidak ada data untuk diekspor"); return; }
     
     const sanitize = (str) => {
-      if(!str || typeof str !== 'string') return '""';
+      if(!str) return '""';
       const cleanStr = str.replace(/[\r\n]+/g, ' ').replace(/"/g, '""');
       return `"${cleanStr}"`;
     };
 
     const headers = ["ID Validasi", "Nama Siswa", "Waktu", "Status Putusan", "Pindah Tab", "Kutipan Naskah", "Uraian Siswa", "Laporan Hasil AI", "Catatan Guru"];
     const rows = safeSubmissions.map(s => [
-      sanitize(s?.certNumber), sanitize(s?.studentName), sanitize(s?.timestamp), sanitize(s?.status), 
-      s?.tabSwitches || 0, sanitize(s?.naskahText), sanitize(s?.deconstructionText), 
-      sanitize(s?.diagnosis), sanitize(s?.teacherFeedback)
+      sanitize(s.certNumber), sanitize(s.studentName), sanitize(s.timestamp), sanitize(s.status), 
+      s.tabSwitches, sanitize(s.naskahText), sanitize(s.deconstructionText), 
+      sanitize(s.diagnosis), sanitize(s.teacherFeedback)
     ]);
     
     const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(";"), ...rows.map(e => e.join(";"))].join("\n");
@@ -456,7 +455,7 @@ export default function App() {
   };
 
   const getDynamicPrompt = (text) => {
-    if (!text || typeof text !== 'string' || text.trim() === '') return 'naskah tersebut';
+    if (!text || text.trim() === '') return 'naskah tersebut';
     const words = text.trim().split(/\s+/);
     const preview = words.slice(0, 5).join(' ');
     return words.length > 5 ? `"${preview}..."` : `"${preview}"`;
@@ -524,7 +523,7 @@ export default function App() {
             </form>
           ) : (
             <form onSubmit={handleStudentLoginFinal} style={styles.form}>
-              <div style={styles.introBox}>📚 Kelas: <b>{currentClass?.subject || ''}</b> ({currentClass?.teacher || ''})</div>
+              <div style={styles.introBox}>📚 Kelas: <b>{currentClass.subject}</b> ({currentClass.teacher})</div>
               <label>Nama Lengkap:</label>
               <input type="text" value={loginStudentName} onChange={(e) => setLoginStudentName(e.target.value)} style={styles.input} required />
               <label>PIN Identitas (4 Digit):</label>
@@ -666,7 +665,7 @@ export default function App() {
                          <p style={{margin: 0, color: '#854d0e', fontSize: '13.5px'}}><b>ℹ️ Mode Bypass Aktif.</b> Sistem AI mati. Pastikan mengetik dengan jelas agar Guru mudah membaca.</p>
                        </div>
                     )}
-                    {activePortfolio && activePortfolio?.status === 'Karya Ditolak / Revisi' && (
+                    {activePortfolio && activePortfolio.status === 'Karya Ditolak / Revisi' && (
                        <div style={{background: '#fef2f2', borderLeft: '4px solid #dc2626', padding: '15px', marginBottom: '20px', borderRadius: '4px'}}>
                          <p style={{margin: 0, color: '#b91c1c', fontSize: '13.5px'}}><b>⚠️ Status: Revisi.</b> Segel telah dibuka oleh guru. Silakan perbaiki dekonstruksi Anda dan kirim ulang.</p>
                        </div>
@@ -706,7 +705,6 @@ export default function App() {
               </div>
             )}
 
-            {/* 🛡️ PROTEKSI HALAMAN PORTOFOLIO SISWA DARI DATA CACHE LAMA */}
             {activeTab === 'portfolio' && (
               <div className={activeTab === 'portfolio' ? "print-area" : ""}>
                 <div style={{marginBottom: '15px'}} className="no-print">
@@ -715,28 +713,28 @@ export default function App() {
                 {activePortfolio ? (
                   <div style={styles.certBox}>
                     <h3 style={{marginTop: 0, textAlign: 'center'}}>BUKTI OTENTISITAS NALAR<br/>Platform 5 - Buletin Pilar Pertama</h3>
-                    <p style={{fontSize: '11px', color: '#666', textAlign: 'center', marginBottom: '20px'}}>Sistem Validasi ID: {activePortfolio?.certNumber || 'PENA-XX'}</p>
-                    <p><b>Kreator / Peserta:</b> {activePortfolio?.studentName}</p>
-                    <p><b>Status Dokumen:</b> <span style={{padding: '4px 10px', background: activePortfolio?.status?.includes('Ditolak') ? '#fee2e2' : '#e2e8f0', color: activePortfolio?.status?.includes('Ditolak') ? '#b91c1c' : '#0f172a', borderRadius: '4px', fontWeight: '700', fontSize: '13px'}}>{activePortfolio?.status || 'Pending'}</span></p>
+                    <p style={{fontSize: '11px', color: '#666', textAlign: 'center', marginBottom: '20px'}}>Sistem Validasi ID: {activePortfolio.certNumber}</p>
+                    <p><b>Kreator / Peserta:</b> {activePortfolio.studentName}</p>
+                    <p><b>Status Dokumen:</b> <span style={{padding: '4px 10px', background: activePortfolio.status.includes('Ditolak') ? '#fee2e2' : '#e2e8f0', color: activePortfolio.status.includes('Ditolak') ? '#b91c1c' : '#0f172a', borderRadius: '4px', fontWeight: '700', fontSize: '13px'}}>{activePortfolio.status}</span></p>
                     
                     <hr style={{border: '0', borderTop: '1px dashed #cbd5e1', margin: '20px 0'}}/>
                     <p style={{fontSize: '13px', color: '#64748b', marginBottom: '5px'}}>Kutipan Permasalahan Original:</p>
-                    <p style={{background: '#f8fafc', padding: '12px', borderRadius: '6px', fontStyle: 'italic', border: '1px solid #e2e8f0'}}>"{activePortfolio?.naskahText || ''}"</p>
+                    <p style={{background: '#f8fafc', padding: '12px', borderRadius: '6px', fontStyle: 'italic', border: '1px solid #e2e8f0'}}>"{activePortfolio.naskahText}"</p>
                     
                     <p style={{fontSize: '13px', color: '#64748b', marginTop: '15px', marginBottom: '5px'}}>Resolusi Kritis (Ennis & Polya):</p>
                     <div style={{background: '#f8fafc', padding: '15px', borderRadius: '6px', whiteSpace: 'pre-wrap', border: '1px solid #e2e8f0', lineHeight: '1.6'}}>
-                      {activePortfolio?.deconstructionText || ''}
+                      {activePortfolio.deconstructionText}
                     </div>
 
-                    <div style={{background: activePortfolio?.diagnosis?.includes('MANUAL') ? '#fefce8' : '#f0fdf4', padding: '15px', borderLeft: `4px solid ${activePortfolio?.diagnosis?.includes('MANUAL') ? '#eab308' : '#16a34a'}`, marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
-                      <p style={{margin: '0 0 8px 0', color: activePortfolio?.diagnosis?.includes('MANUAL') ? '#854d0e' : '#166534', display: 'flex', alignItems: 'center', gap: '5px'}}><b>🤖 Laporan Analisis Mesin AI:</b></p>
-                      <p style={{margin: 0, lineHeight: '1.6', fontSize: '13.5px', color: activePortfolio?.diagnosis?.includes('MANUAL') ? '#713f12' : '#14532d'}}>{activePortfolio?.diagnosis || 'Sistem belum merekam diagnosis'}</p>
+                    <div style={{background: activePortfolio.diagnosis.includes('MANUAL') ? '#fefce8' : '#f0fdf4', padding: '15px', borderLeft: `4px solid ${activePortfolio.diagnosis.includes('MANUAL') ? '#eab308' : '#16a34a'}`, marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
+                      <p style={{margin: '0 0 8px 0', color: activePortfolio.diagnosis.includes('MANUAL') ? '#854d0e' : '#166534', display: 'flex', alignItems: 'center', gap: '5px'}}><b>🤖 Laporan Analisis Mesin AI:</b></p>
+                      <p style={{margin: 0, lineHeight: '1.6', fontSize: '13.5px', color: activePortfolio.diagnosis.includes('MANUAL') ? '#713f12' : '#14532d'}}>{activePortfolio.diagnosis}</p>
                     </div>
                     
-                    {activePortfolio?.teacherFeedback && (
+                    {activePortfolio.teacherFeedback && (
                       <div style={{background: '#eff6ff', padding: '15px', borderLeft: '4px solid #2563eb', marginTop: '15px', borderRadius: '0 6px 6px 0'}}>
                          <p style={{margin: '0 0 8px 0', color: '#1e3a8a'}}><b>👨‍🏫 Respon dan Pendapat Guru:</b></p>
-                         <p style={{margin: 0, color: '#1e40af', lineHeight: '1.6'}}>{activePortfolio?.teacherFeedback}</p>
+                         <p style={{margin: 0, color: '#1e40af', lineHeight: '1.6'}}>{activePortfolio.teacherFeedback}</p>
                       </div>
                     )}
                   </div>
@@ -748,7 +746,6 @@ export default function App() {
 
         {userRole === 'guru' && (
           <>
-            {/* 🛡️ PROTEKSI DASBOR GURU DARI DATA CACHE LAMA */}
             {activeTab === 'guruDashboard' && (
               <div className={activeTab === 'guruDashboard' ? "print-area" : ""}>
                 <div style={styles.card}>
@@ -772,23 +769,16 @@ export default function App() {
                         </thead>
                         <tbody>
                           {safeSubmissions.map(sub => (
-                            <tr key={sub?.id} style={{borderBottom: '1px solid #f1f5f9', transition: 'all 0.2s'}}>
+                            <tr key={sub.id} style={{borderBottom: '1px solid #f1f5f9', transition: 'all 0.2s'}}>
                               <td style={{padding: '15px 10px'}}>
-                                <b>{sub?.studentName || 'Anonim'}</b><br/>
-                                <span style={{fontSize: '11.5px', color: '#64748b'}}>
-                                  Pelanggaran: {sub?.tabSwitches || 0} Tab | Mode: 
-                                  <span style={{color: sub?.diagnosis?.includes('MANUAL') ? '#d97706' : (sub?.diagnosis?.includes('GAGAL') || sub?.diagnosis?.includes('ERROR')) ? '#dc2626' : '#16a34a', fontWeight: 'bold', marginLeft: '4px'}}>
-                                    {sub?.diagnosis?.includes('MANUAL') ? 'Manual Guru' : (sub?.diagnosis?.includes('GAGAL') || sub?.diagnosis?.includes('ERROR')) ? 'Ditolak' : 'AI Lolos'}
-                                  </span>
-                                </span>
+                                <b>{sub.studentName}</b><br/>
+                                <span style={{fontSize: '11.5px', color: '#64748b'}}>Pelanggaran: {sub.tabSwitches} Tab | Mode: <span style={{color: sub.diagnosis.includes('MANUAL') ? '#d97706' : sub.diagnosis.includes('GAGAL') || sub.diagnosis.includes('ERROR') ? '#dc2626' : '#16a34a', fontWeight: 'bold'}}>{sub.diagnosis.includes('MANUAL') ? 'Manual Guru' : sub.diagnosis.includes('GAGAL') || sub.diagnosis.includes('ERROR') ? 'Ditolak' : 'AI Lolos'}</span></span>
                               </td>
-                              <td style={{padding: '15px 10px', fontWeight: '600', color: sub?.status?.includes('Ditolak') ? '#dc2626' : '#334155'}}>
-                                {sub?.status || 'Menunggu'}
-                              </td>
+                              <td style={{padding: '15px 10px', fontWeight: '600', color: sub.status.includes('Ditolak') ? '#dc2626' : '#334155'}}>{sub.status}</td>
                               <td style={{padding: '15px 10px', textAlign: 'right'}} className="no-print">
                                 <div style={{display: 'flex', gap: '8px', justifyContent: 'flex-end'}}>
                                   <button style={styles.btnTable} onClick={() => setSelectedSubmission(sub)}>Tinjau Naskah</button>
-                                  <button style={{...styles.btnTable, background: '#fee2e2', color: '#b91c1c'}} onClick={() => handleDeleteSubmission(sub?.id)}>Hapus</button>
+                                  <button style={{...styles.btnTable, background: '#fee2e2', color: '#b91c1c'}} onClick={() => handleDeleteSubmission(sub.id)}>Hapus</button>
                                 </div>
                               </td>
                             </tr>
@@ -827,10 +817,10 @@ export default function App() {
                 
                 <ul style={{paddingLeft: 0, listStyle: 'none', fontSize: '14px', color: '#334155'}}>
                   {safeStudents.map(s => (
-                    <li key={s?.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 12px', borderBottom: '1px solid #f1f5f9', background: '#fafafa', borderRadius: '6px', marginBottom: '8px'}}>
-                      <span><b>{s?.name}</b> <span style={{margin: '0 10px', color: '#cbd5e1'}}>|</span> PIN Autentikasi: <span style={{color: '#dc2626', fontWeight: '900', letterSpacing: '1px'}}>{s?.pin}</span></span>
+                    <li key={s.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 12px', borderBottom: '1px solid #f1f5f9', background: '#fafafa', borderRadius: '6px', marginBottom: '8px'}}>
+                      <span><b>{s.name}</b> <span style={{margin: '0 10px', color: '#cbd5e1'}}>|</span> PIN Autentikasi: <span style={{color: '#dc2626', fontWeight: '900', letterSpacing: '1px'}}>{s.pin}</span></span>
                       <button style={{background: 'none', border: 'none', color: '#b91c1c', cursor: 'pointer', fontWeight: '700', padding: '5px 10px', borderRadius: '4px'}} onClick={() => {
-                        const updated = safeStudents.filter(st => st?.id !== s?.id);
+                        const updated = safeStudents.filter(st => st.id !== s.id);
                         setStudents(updated);
                         localStorage.setItem(getStorageKeys(currentClass, userRole).students, JSON.stringify(updated));
                       }}>Cabut Akses</button>
@@ -840,7 +830,6 @@ export default function App() {
               </div>
             )}
 
-            {/* 🛡️ PROTEKSI TINJAUAN GURU DARI DATA CACHE LAMA */}
             {selectedSubmission && (
               <div style={styles.modalOverlay} className="no-print">
                 <div style={styles.modalCardLarge}>
@@ -848,19 +837,19 @@ export default function App() {
                   
                   <div style={{fontSize: '13.5px', background: '#f8fafc', padding: '20px', borderRadius: '8px', margin: '20px 0', maxHeight: '350px', overflowY: 'auto', border: '1px solid #e2e8f0'}}>
                     <div style={{display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #cbd5e1', paddingBottom: '10px', marginBottom: '15px'}}>
-                      <p style={{margin: 0}}><b>Kreator:</b> {selectedSubmission?.studentName || 'Anonim'}</p>
-                      <p style={{margin: 0, color: '#64748b'}}>Waktu: {selectedSubmission?.timestamp || '-'}</p>
+                      <p style={{margin: 0}}><b>Kreator:</b> {selectedSubmission.studentName}</p>
+                      <p style={{margin: 0, color: '#64748b'}}>Waktu: {selectedSubmission.timestamp}</p>
                     </div>
                     
                     <p style={{color: '#475569', margin: '0 0 5px 0'}}><b>Kutipan Kasus:</b></p>
-                    <p style={{background: '#fff', padding: '12px', borderRadius: '6px', fontStyle: 'italic', border: '1px solid #e2e8f0', margin: '0 0 20px 0'}}>"{selectedSubmission?.naskahText || ''}"</p>
+                    <p style={{background: '#fff', padding: '12px', borderRadius: '6px', fontStyle: 'italic', border: '1px solid #e2e8f0', margin: '0 0 20px 0'}}>"{selectedSubmission.naskahText}"</p>
                     
                     <p style={{color: '#475569', margin: '0 0 5px 0'}}><b>Argumen Dekonstruksi Terpadu:</b></p>
-                    <div style={{whiteSpace: 'pre-wrap', color: '#1e293b', background: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', lineHeight: '1.6'}}>{selectedSubmission?.deconstructionText || ''}</div>
+                    <div style={{whiteSpace: 'pre-wrap', color: '#1e293b', background: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', lineHeight: '1.6'}}>{selectedSubmission.deconstructionText}</div>
                     
-                    <div style={{background: selectedSubmission?.diagnosis?.includes('MANUAL') ? '#fefce8' : '#f0fdf4', padding: '15px', borderLeft: `4px solid ${selectedSubmission?.diagnosis?.includes('MANUAL') ? '#eab308' : '#16a34a'}`, marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
-                      <p style={{margin: '0 0 5px 0', color: selectedSubmission?.diagnosis?.includes('MANUAL') ? '#854d0e' : '#166534'}}><b>🤖 Laporan Analisis Sistem:</b></p>
-                      <span style={{color: selectedSubmission?.diagnosis?.includes('MANUAL') ? '#713f12' : '#14532d', lineHeight: '1.6'}}>{selectedSubmission?.diagnosis || 'Sistem belum merekam diagnosis'}</span>
+                    <div style={{background: selectedSubmission.diagnosis.includes('MANUAL') ? '#fefce8' : '#f0fdf4', padding: '15px', borderLeft: `4px solid ${selectedSubmission.diagnosis.includes('MANUAL') ? '#eab308' : '#16a34a'}`, marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
+                      <p style={{margin: '0 0 5px 0', color: selectedSubmission.diagnosis.includes('MANUAL') ? '#854d0e' : '#166534'}}><b>🤖 Laporan Analisis Sistem:</b></p>
+                      <span style={{color: selectedSubmission.diagnosis.includes('MANUAL') ? '#713f12' : '#14532d', lineHeight: '1.6'}}>{selectedSubmission.diagnosis}</span>
                     </div>
                   </div>
                   
@@ -868,8 +857,8 @@ export default function App() {
                   <textarea rows="3" placeholder="Sampaikan keputusan final Anda secara komprehensif..." value={teacherNoteInput} onChange={(e) => setTeacherNoteInput(e.target.value)} style={{...styles.textarea, marginTop: '8px', marginBottom: '20px'}} />
                   
                   <div style={styles.modalActions}>
-                    <button style={{...styles.btnPrimary, flex: 1, background: '#16a34a'}} onClick={() => handleTeacherAction(selectedSubmission?.id, 'Disetujui Otoritas (ACC)')}>ACC (Lolos Orisinalitas)</button>
-                    <button style={{...styles.btnDanger, flex: 1}} onClick={() => handleTeacherAction(selectedSubmission?.id, 'Karya Ditolak / Revisi')}>Kunci Dibuka (Minta Revisi)</button>
+                    <button style={{...styles.btnPrimary, flex: 1, background: '#16a34a'}} onClick={() => handleTeacherAction(selectedSubmission.id, 'Disetujui Otoritas (ACC)')}>ACC (Lolos Orisinalitas)</button>
+                    <button style={{...styles.btnDanger, flex: 1}} onClick={() => handleTeacherAction(selectedSubmission.id, 'Karya Ditolak / Revisi')}>Kunci Dibuka (Minta Revisi)</button>
                   </div>
                   <button style={{...styles.textBtn, width: '100%', marginTop: '10px'}} onClick={() => setSelectedSubmission(null)}>Batal & Tutup Dokumen</button>
                 </div>
