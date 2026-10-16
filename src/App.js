@@ -15,7 +15,7 @@ const session = {
 };
 
 const MASTER_ADMIN_PASSWORD = "adminpena"; 
-const GEMINI_MODEL = "gemini-1.5-flash"; // ✅ KEMBALI KE VERSI ASLI YANG VALID
+const GEMINI_MODEL = "gemini-3.8-flash"; // ✅ KEMBALI KE VERSI ASLI YANG VALID
 
 // ==========================================
 // 🧠 OTAK AI SAKTI (CANGKOKAN DARI KODE LAMA)
