@@ -123,8 +123,15 @@ export default function App() {
     setIsApiValid(false);
   };
 
-  // 🛡️ AUTO-HEALING SYSTEM
+  // 🛡️ AUTO-HEALING SYSTEM (DENGAN PERBAIKAN DEADLOCK LAYAR PUTIH)
   useEffect(() => {
+    if (!userRole) {
+      // PERBAIKAN 1: Jika tidak ada role aktif (termasuk habis dicabut guru), paksa tab kembali ke landing
+      if (activeTab !== 'landing' && activeTab !== 'loginSiswa') {
+        setActiveTab('landing');
+      }
+      return;
+    }
     if ((userRole === 'siswa' || userRole === 'mandiri') && !currentStudent) {
         doLogout(); return;
     }
@@ -141,7 +148,7 @@ export default function App() {
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'classes'), (snap) => {
       const cls = [];
-      snap.forEach(d => cls.push({ id: d.id, ...d.data() }));
+      snap.forEach(d => push({ id: d.id, ...d.data() }));
       setAllClasses(cls);
     });
     return () => unsub();
@@ -166,13 +173,12 @@ export default function App() {
         const stu = []; snap.forEach(d => stu.push({ id: d.id, ...d.data() })); 
         setStudents(stu);
         
-        // Pengecekan real-time: Tendang siswa kalau akses dicabut instruktur
+        // PERBAIKAN 2: Pengecekan real-time. Tendang siswa dengan fungsi terpadu doLogout()
         if (userRole === 'siswa' && currentStudent) {
             const isExist = stu.some(s => s.name === currentStudent.name && s.pin === currentStudent.pin);
             if (!isExist && !snap.metadata.hasPendingWrites) {
                 alert("Akses kamu ke kelas ini telah dicabut oleh instruktur.");
-                session.clear();
-                window.location.reload(); // Reset paksa biar aman
+                doLogout(); // Bersihkan memori dengan aman, tidak di-reload paksa
             }
         }
       });
@@ -333,7 +339,7 @@ Analisis Aspek Polya Siswa: "${formData.polyaText}"
 
 Instruksi Evaluasi:
 1. Bedah korelasi argumen siswa dengan kutipan naskah awal. Jangan merangkum, tapi evaluasi kedalamannya.
-2. Nilai pemahaman masalah, asumsi tersembunyi, dan eksekusi solusinya.
+​2. Nilai pemahaman masalah, asumsi tersembunyi, dan eksekusi solusinya.
 3. Berikan diagnosis evaluatif (maksimal 2 paragraf padat). Jelaskan spesifik apa yang sudah logis dan apa yang masih perlu diperbaiki.`;
         
         const aiResponse = await callGeminiAPI(prompt, activeKeyToUse, 3);
