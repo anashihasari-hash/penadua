@@ -41,7 +41,7 @@ const MASTER_ADMIN_PASSWORD = "adminpena";
 const GEMINI_MODEL = "gemini-3.8-flash"; 
 
 // ==========================================
-// 🧠 OTAK AI SAKTI (TIDAK DISENTUH)
+// 🧠 OTAK AI PENDIDIK (PROMPT DIPERBARUI)
 // ==========================================
 const callGeminiAPI = async (prompt, apiKey, retries = 3) => {
   if (!apiKey || !apiKey.trim()) throw new Error("API Key belum dimasukkan!");
@@ -80,7 +80,6 @@ export default function App() {
   const [currentClass, setCurrentClass] = useState(() => session.get('PENA_CLASS', null));
   const [currentStudent, setCurrentStudent] = useState(() => session.get('PENA_STUDENT', null));
   
-  // FIX LAYAR BLANK: Tambahin State yang kurang
   const [classCodeInput, setClassCodeInput] = useState('');
   const [loginStudentName, setLoginStudentName] = useState('');
   const [loginStudentPin, setLoginStudentPin] = useState('');
@@ -93,6 +92,8 @@ export default function App() {
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
   const [isValidatingApi, setIsValidatingApi] = useState(false);
 
+  // STATE KANVAS DUA TAHAP
+  const [isKutipanLocked, setIsKutipanLocked] = useState(false);
   const [isPasted, setIsPasted] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [formData, setFormData] = useState({ naskahText: '', ennisText: '', polyaText: '' });
@@ -113,10 +114,19 @@ export default function App() {
   const [showMandiriModal, setShowMandiriModal] = useState(false);
   const [mandiriNameInput, setMandiriNameInput] = useState('');
 
+  const doLogout = () => {
+    session.clear(); 
+    setCurrentStudent(null); setCurrentClass(null); setUserRole(null);
+    setSubmissions([]); setStudents([]); setActiveTab('landing'); resetCanvasState();
+    setClassCodeInput(''); setLoginStudentName(''); setLoginStudentPin('');
+    setTeacherNameInput(''); setSubjectInput(''); setPinInput(''); setMandiriNameInput('');
+    setIsApiValid(false);
+  };
+
   // 🛡️ AUTO-HEALING SYSTEM
   useEffect(() => {
     if ((userRole === 'siswa' || userRole === 'mandiri') && !currentStudent) {
-        handleLogout(); return;
+        doLogout(); return;
     }
     if (userRole === 'siswa' || userRole === 'mandiri') {
         if (activeTab === 'guruDashboard' || activeTab === 'guruSiswa') setActiveTab('introSiswa');
@@ -137,7 +147,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // 🔥 TARIK DATA SISWA & TUGAS BERDASARKAN KELAS REAL-TIME
+  // 🔥 TARIK DATA SISWA & TUGAS (REAL-TIME KICK BILA DICABUT GURU)
   useEffect(() => {
     if (!currentClass && userRole !== 'mandiri') { setSubmissions([]); setStudents([]); return; }
 
@@ -153,7 +163,18 @@ export default function App() {
     let unsubStu = () => {};
     if (qStu) {
       unsubStu = onSnapshot(qStu, (snap) => {
-        const stu = []; snap.forEach(d => stu.push({ id: d.id, ...d.data() })); setStudents(stu);
+        const stu = []; snap.forEach(d => stu.push({ id: d.id, ...d.data() })); 
+        setStudents(stu);
+        
+        // Pengecekan real-time: Tendang siswa kalau akses dicabut instruktur
+        if (userRole === 'siswa' && currentStudent) {
+            const isExist = stu.some(s => s.name === currentStudent.name && s.pin === currentStudent.pin);
+            if (!isExist && !snap.metadata.hasPendingWrites) {
+                alert("Akses kamu ke kelas ini telah dicabut oleh instruktur.");
+                session.clear();
+                window.location.reload(); // Reset paksa biar aman
+            }
+        }
       });
     }
 
@@ -161,7 +182,7 @@ export default function App() {
     if (qSub) {
        unsubSub = onSnapshot(qSub, (snap) => {
         const sub = []; snap.forEach(d => sub.push({ id: d.id, ...d.data() }));
-        setSubmissions(sub.sort((a,b) => b.timestampMs - a.timestampMs)); // Urutkan terbaru
+        setSubmissions(sub.sort((a,b) => b.timestampMs - a.timestampMs)); 
       });
     }
 
@@ -170,7 +191,7 @@ export default function App() {
 
   const resetCanvasState = () => {
     setFormData({ naskahText: '', ennisText: '', polyaText: '' });
-    setIsPasted(false); setTabSwitchCount(0);
+    setIsPasted(false); setTabSwitchCount(0); setIsKutipanLocked(false);
   };
 
   const handleVerifyClassCode = (e) => {
@@ -213,7 +234,6 @@ export default function App() {
     } else {
       const classCode = Math.floor(10000 + Math.random() * 90000).toString();
       targetClass = { teacher: tName, subject: sName, pin: pin, classCode: classCode };
-      // Simpan ke Firebase
       await addDoc(collection(db, 'classes'), targetClass);
       alert(`🎉 KELAS DIBUAT!\nKODE AKSES MURID: ${classCode}`);
     }
@@ -246,25 +266,15 @@ export default function App() {
     resetCanvasState(); setShowMandiriModal(false); setActiveTab('introSiswa'); 
   };
 
-  const handleLogout = () => {
-    session.clear(); 
-    setCurrentStudent(null); setCurrentClass(null); setUserRole(null);
-    setSubmissions([]); setStudents([]); setActiveTab('landing'); resetCanvasState();
-    setClassCodeInput(''); setLoginStudentName(''); setLoginStudentPin('');
-    setTeacherNameInput(''); setSubjectInput(''); setPinInput(''); setMandiriNameInput('');
-    setIsApiValid(false);
-  };
-
+  // PENDETEKSI TAB SWITCH (AKTIF HANYA JIKA KUTIPAN TERKUNCI)
   useEffect(() => {
-    if (activeTab !== 'workspace' || !currentStudent) return;
+    if (activeTab !== 'workspace' || !currentStudent || !isKutipanLocked) return;
     const handleVisibilityChange = () => { if (document.hidden) setTabSwitchCount(prev => prev + 1); };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [activeTab, currentStudent]);
+  }, [activeTab, currentStudent, isKutipanLocked]);
 
-  const activeSubmissionId = submissions.find(s => s?.studentName === currentStudent?.name)?.id;
-  const activePortfolio = submissions.find(s => s?.id === activeSubmissionId);
-  
+  const activePortfolio = submissions.find(s => s?.studentName === currentStudent?.name);
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Karya Ditolak / Revisi';
   const isWorkspaceAllowed = isApiValid || isBypassAI; 
 
@@ -292,15 +302,19 @@ export default function App() {
     setActiveTab('workspace');
   };
 
+  const handleLockKutipan = () => {
+    if (formData.naskahText.trim().length < 15) {
+      alert('Kutipan naskah terlalu pendek, silakan lengkapi dulu.'); return;
+    }
+    setIsKutipanLocked(true);
+  };
+
   const handleSubmitCanvas = async (e) => {
     e.preventDefault();
     setIsSubmittingTask(true);
     let diagnosis = "";
-    const hasViolations = isPasted || tabSwitchCount > 0;
 
-    if (hasViolations) {
-      diagnosis = `[GAGAL INTEGRITAS] Terdeteksi perpindahan tab (${tabSwitchCount}x) atau copy-paste. Argumen didiskualifikasi otomatis.`;
-    } else if (isBypassAI) {
+    if (isBypassAI) {
       diagnosis = `[EVALUASI MANUAL] Mesin AI dinonaktifkan oleh pengguna. Menunggu tinjauan langsung dan validasi dari Guru.`;
     } else {
       const activeKeyToUse = localStorage.getItem('PENA_AI_KEY') || defaultSysKey;
@@ -309,7 +323,19 @@ export default function App() {
         setActiveTab('introSiswa'); setIsSubmittingTask(false); return;
       }
       try {
-        const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
+        const prompt = `Bertindaklah sebagai "Pendidik Kritis yang Membangun". Tugas Anda mengevaluasi karya analitis siswa secara komprehensif, obyektif, dan suportif.
+HINDARI KATA MERENDAHKAN (seperti dangkal, gagal total, asal-asalan). Apresiasi logika yang benar, berikan masukan konstruktif jika ada celah nalar.
+
+Kutipan Masalah Utama: "${formData.naskahText}"
+
+Analisis Aspek Ennis Siswa: "${formData.ennisText}"
+Analisis Aspek Polya Siswa: "${formData.polyaText}"
+
+Instruksi Evaluasi:
+1. Bedah korelasi argumen siswa dengan kutipan naskah awal. Jangan merangkum, tapi evaluasi kedalamannya.
+2. Nilai pemahaman masalah, asumsi tersembunyi, dan eksekusi solusinya.
+3. Berikan diagnosis evaluatif (maksimal 2 paragraf padat). Jelaskan spesifik apa yang sudah logis dan apa yang masih perlu diperbaiki.`;
+        
         const aiResponse = await callGeminiAPI(prompt, activeKeyToUse, 3);
         diagnosis = `[HASIL EVALUASI AI] ${aiResponse}`;
       } catch (err) {
@@ -318,10 +344,8 @@ export default function App() {
     }
 
     const combinedDeconstruction = `[ENNIS]: ${formData.ennisText}\n\n[POLYA]: ${formData.polyaText}`;
-
-    // Simpan Karya ke Firebase
-    await addDoc(collection(db, 'submissions'), {
-      certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}`,
+    
+    const submissionData = {
       classCode: currentClass?.classCode || 'MANDIRI',
       studentName: currentStudent.name,
       mode: userRole === 'mandiri' ? 'Mandiri (Privat)' : 'Tugas Kelas',
@@ -332,7 +356,14 @@ export default function App() {
       timestampMs: Date.now(),
       status: userRole === 'mandiri' ? 'Selesai (Auto)' : 'Pending Review Guru',
       teacherFeedback: ''
-    });
+    };
+
+    // CEK REVISI: Kalau sebelumnya udah ada data dan statusnya Ditolak, kita TIMPA (Bukan Bikin Baru)
+    if (activePortfolio && activePortfolio.status === 'Karya Ditolak / Revisi') {
+       await updateDoc(doc(db, 'submissions', activePortfolio.id), submissionData);
+    } else {
+       await addDoc(collection(db, 'submissions'), { ...submissionData, certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}` });
+    }
 
     setIsPasted(false); setTabSwitchCount(0); setIsSubmittingTask(false);
     setActiveTab('portfolio');
@@ -342,14 +373,12 @@ export default function App() {
   const [teacherNoteInput, setTeacherNoteInput] = useState('');
 
   const handleTeacherAction = async (id, status) => {
-    // Update data di Firebase
     await updateDoc(doc(db, 'submissions', id), { status, teacherFeedback: teacherNoteInput });
     setSelectedSubmission(null); setTeacherNoteInput('');
   };
 
   const handleDeleteSubmission = async (id) => {
     if(window.confirm('Yakin ingin menghapus hasil evaluasi siswa ini? Siswa harus mengulang tugasnya dari awal.')){
-      // Hapus data dari Firebase
       await deleteDoc(doc(db, 'submissions', id));
     }
   };
@@ -359,14 +388,13 @@ export default function App() {
     const name = e.target.sName.value.trim();
     if(name) {
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
-      // Tambah Siswa ke Firebase
       await addDoc(collection(db, 'students'), { classCode: currentClass.classCode, name, pin });
       e.target.sName.value = ''; alert(`Berhasil! PIN otentikasi untuk ${name} adalah: ${pin}`);
     }
   };
 
   const handleRemoveStudent = async (id) => {
-    if(window.confirm('Cabut akses siswa ini dari kelas?')) {
+    if(window.confirm('Cabut akses siswa ini dari kelas? (Siswa akan otomatis ditendang dari layar mereka saat ini)')) {
       await deleteDoc(doc(db, 'students', id));
     }
   };
@@ -411,7 +439,7 @@ export default function App() {
 
       <header style={styles.header} className="no-print">
         <h2 style={styles.logoText}>PENA Pilar 2</h2>
-        {userRole && <button style={styles.textBtn} onClick={handleLogout}>Keluar Sesi</button>}
+        {userRole && <button style={styles.textBtn} onClick={doLogout}>Keluar Sesi</button>}
       </header>
 
       {!userRole && activeTab === 'landing' && (
@@ -554,29 +582,34 @@ export default function App() {
                 <h2>Konfigurasi Sistem Evaluasi</h2>
                 <div style={{...styles.introBox, background: isApiValid ? '#f0fdf4' : '#fefce8', borderColor: isApiValid ? '#bbf7d0' : '#fef08a'}}>
                   <p style={{margin: '0 0 8px 0', color: isApiValid ? '#166534' : '#854d0e'}}>
-                    <b>Status Sistem Vercel Saat Ini: {isApiValid ? '✅ Siap (Tinggal Gas)' : '⚠️ Terkena Limit / Kosong'}</b>
+                    <b>Status Sistem: {isApiValid ? '✅ Siap Digunakan' : '⚠️ Menunggu Integrasi Kunci'}</b>
                   </p>
                   {!isApiValid && (
-                    <p style={{margin: 0, fontSize: '13.5px', color: '#475569', lineHeight: '1.6'}}>Sistem Utama AI belum mendeteksi sesi aktif. Selesaikan opsi di bawah untuk membuka segel Kanvas.</p>
+                    <p style={{margin: 0, fontSize: '13.5px', color: '#475569', lineHeight: '1.6'}}>Sistem Penilaian AI belum aktif. Ikuti langkah di bawah untuk menghubungkan kunci API Anda.</p>
                   )}
                 </div>
 
                 <div style={{display: 'flex', flexDirection: 'column', gap: '30px'}}>
                   <div style={{border: '1px solid #e2e8f0', padding: '20px', borderRadius: '8px'}}>
-                    <h3 style={{marginTop: 0, color: '#0f172a'}}>Opsi Utama: Validasi Kunci AI Pribadi</h3>
-                    <p style={{fontSize: '13px', color: '#475569', lineHeight: '1.6'}}>Mesin AI Gemini mengunci akses tanpa API Key yang sah. Dapatkan kunci AQ... di <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 'bold'}}>Google AI Studio</a>. <br/><b style={{color: '#dc2626'}}>(Catatan: Wajib gunakan email @gmail.com pribadi dan setelan usia akun 18+ agar tidak diblokir Google).</b></p>
+                    <h3 style={{marginTop: 0, color: '#0f172a'}}>Cara Validasi Kunci AI Pribadi</h3>
+                    <ol style={{fontSize: '13px', color: '#475569', lineHeight: '1.6', paddingLeft: '18px'}}>
+                       <li>Buka situs <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 'bold'}}>Google AI Studio</a>.</li>
+                       <li>Login menggunakan Email pribadi (Pastikan pengaturan usia akun 18+).</li>
+                       <li>Klik tombol "Create API Key" untuk mendapatkan kode yang berawalan "AQ...".</li>
+                       <li>Salin kode tersebut dan tempelkan pada kolom di bawah ini.</li>
+                    </ol>
                     <form onSubmit={checkApiValidity}>
                       <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{...styles.input, marginTop: '8px'}} placeholder="Tempel kunci API AQ... di sini..." required />
                       <button type="submit" style={{...styles.btnPrimary, marginTop: '15px', background: '#0f172a'}} disabled={isValidatingApi}>
-                        {isValidatingApi ? 'Menguji Koneksi Google...' : 'Uji Ping & Buka Segel Kanvas'}
+                        {isValidatingApi ? 'Menguji Koneksi Google...' : 'Uji & Aktifkan Kanvas'}
                       </button>
                     </form>
                   </div>
 
                   {userRole === 'siswa' && (
                     <div style={{border: '1px solid #fecaca', background: '#fef2f2', padding: '20px', borderRadius: '8px'}}>
-                      <h3 style={{marginTop: 0, color: '#991b1b'}}>Opsi Cadangan: Bypass Sistem (Evaluasi Manual)</h3>
-                      <p style={{fontSize: '13px', color: '#991b1b', lineHeight: '1.6'}}>Jika kamu tidak memiliki kunci API, matikan integrasi AI. Jawaban Kanvas kamu akan langsung dikirim untuk dibaca dan dinilai secara manual oleh Guru.</p>
+                      <h3 style={{marginTop: 0, color: '#991b1b'}}>Opsi Cadangan: Evaluasi Manual</h3>
+                      <p style={{fontSize: '13px', color: '#991b1b', lineHeight: '1.6'}}>Jika kamu terkendala dalam mendapatkan API Key, kamu dapat mematikan sistem AI. Jawabanmu akan langsung dikirim dan dinilai secara manual oleh Guru.</p>
                       <button onClick={handleBypassAI} style={{...styles.btnPrimary, marginTop: '10px', background: '#dc2626'}}>Lanjutkan Tanpa AI (Manual Guru)</button>
                     </div>
                   )}
@@ -602,39 +635,53 @@ export default function App() {
                     )}
                     {activePortfolio && activePortfolio.status === 'Karya Ditolak / Revisi' && (
                        <div style={{background: '#fef2f2', borderLeft: '4px solid #dc2626', padding: '15px', marginBottom: '20px', borderRadius: '4px'}}>
-                         <p style={{margin: 0, color: '#b91c1c', fontSize: '13.5px'}}><b>⚠️ Status: Revisi.</b> Segel telah dibuka oleh guru. Silakan perbaiki dekonstruksi Anda dan kirim ulang.</p>
+                         <p style={{margin: 0, color: '#b91c1c', fontSize: '13.5px'}}><b>⚠️ Status: Revisi.</b> Segel telah dibuka oleh guru. Silakan perbaiki dan kirim ulang naskah Anda.</p>
                        </div>
                     )}
 
-                    <div style={styles.monitor}>
-                      <span>Integritas Layar (Tab): <b style={{color: tabSwitchCount > 0 ? '#dc2626' : '#16a34a'}}>{tabSwitchCount}x</b></span>
-                      <span>Integritas Input (Paste): <b style={{color: isPasted ? '#dc2626' : '#16a34a'}}>{isPasted ? 'Gagal (Terdeteksi)' : 'Aman'}</b></span>
-                    </div>
+                    {!isKutipanLocked ? (
+                       <div style={{border: '1px solid #e2e8f0', padding: '20px', borderRadius: '8px', background: '#f8fafc'}}>
+                          <label style={{fontWeight: '700', color: '#1e293b', fontSize: '15px'}}>Tahap 1: Masukkan Kutipan Masalah Utama</label>
+                          <p style={{fontSize: '13px', color: '#64748b', marginTop: '5px', marginBottom: '15px'}}>Pada tahap ini, kamu masih bebas mencari dan copy-paste sumber. Setelah dikunci, sistem anti-kecurangan akan aktif.</p>
+                          <textarea rows="4" placeholder="Tempelkan premis atau kutipan asli yang ingin dianalisis di sini..." value={formData.naskahText} onChange={(e) => setFormData({...formData, naskahText: e.target.value})} style={{...styles.textarea, marginBottom: '20px'}} required />
+                          <button type="button" style={{...styles.btnPrimary, background: '#2563eb'}} onClick={handleLockKutipan}>
+                             Kunci Kutipan & Lanjut Analisis
+                          </button>
+                       </div>
+                    ) : (
+                       <form onSubmit={handleSubmitCanvas}>
+                          <div style={styles.monitor}>
+                            <span>Integritas Layar (Pindah Tab): <b style={{color: tabSwitchCount > 0 ? '#dc2626' : '#16a34a'}}>{tabSwitchCount}x</b></span>
+                            <span>Integritas Input (Paste): <b style={{color: isPasted ? '#dc2626' : '#16a34a'}}>{isPasted ? 'Terdeteksi' : 'Aman'}</b></span>
+                          </div>
 
-                    <form onSubmit={handleSubmitCanvas}>
-                      <label style={{fontWeight: '700', color: '#1e293b'}}>1. Kutipan Sumber Masalah Utama:</label>
-                      <textarea rows="3" placeholder="Masukkan premis asli..." value={formData.naskahText} onChange={(e) => setFormData({...formData, naskahText: e.target.value})} style={{...styles.textarea, marginBottom: '20px', marginTop: '5px'}} required />
+                          <div style={{background: '#f1f5f9', padding: '15px', borderRadius: '6px', marginBottom: '25px', border: '1px solid #e2e8f0'}}>
+                             <p style={{margin: '0 0 5px 0', fontSize: '13px', color: '#64748b', fontWeight: 'bold'}}>Kutipan Terkunci:</p>
+                             <p style={{margin: 0, fontStyle: 'italic', color: '#334155'}}>{formData.naskahText}</p>
+                             <button type="button" onClick={() => setIsKutipanLocked(false)} style={{...styles.textBtn, padding: '5px 0', fontSize: '12px', marginTop: '10px'}}>Edit Kutipan</button>
+                          </div>
 
-                      <div style={styles.promptBox}>
-                        <p style={{margin: '0 0 8px 0', fontWeight: 'bold', color: '#0f172a'}}>🧠 Aspek Dekonstruksi ENNIS (5 Indikator)</p>
-                        <p style={{margin: 0, fontSize: '12.5px', color: '#475569', lineHeight: '1.5'}}>
-                          <b>Pemantik:</b> Uraikan penjelasan sederhana, kredibilitas data, deduksi/induksi, asumsi tersembunyi, dan taktik strategisnya terhadap topik <b>{getDynamicPrompt(formData.naskahText)}</b>!
-                        </p>
-                      </div>
-                      <textarea rows="6" placeholder="Uraikan aspek Ennis..." value={formData.ennisText} onChange={(e) => setFormData({...formData, ennisText: e.target.value})} onPaste={() => setIsPasted(true)} style={{...styles.textarea, marginBottom: '20px'}} required />
+                          <div style={styles.promptBox}>
+                            <p style={{margin: '0 0 8px 0', fontWeight: 'bold', color: '#0f172a'}}>🧠 Aspek Dekonstruksi ENNIS (5 Indikator)</p>
+                            <p style={{margin: 0, fontSize: '12.5px', color: '#475569', lineHeight: '1.5'}}>
+                              <b>Pemantik:</b> Uraikan penjelasan sederhana, kredibilitas data, deduksi/induksi, asumsi tersembunyi, dan taktik strategisnya terhadap topik <b>{getDynamicPrompt(formData.naskahText)}</b>!
+                            </p>
+                          </div>
+                          <textarea rows="6" placeholder="Uraikan aspek Ennis secara original..." value={formData.ennisText} onChange={(e) => setFormData({...formData, ennisText: e.target.value})} onPaste={() => setIsPasted(true)} style={{...styles.textarea, marginBottom: '20px'}} required />
 
-                      <div style={{...styles.promptBox, borderLeftColor: '#3b82f6'}}>
-                        <p style={{margin: '0 0 8px 0', fontWeight: 'bold', color: '#1d4ed8'}}>⚙️ Aspek Penyelesaian POLYA (4 Tahapan)</p>
-                        <p style={{margin: 0, fontSize: '12.5px', color: '#475569', lineHeight: '1.5'}}>
-                          <b>Pemantik:</b> Jabarkan pemahaman masalah, rencana pemecahan, eksekusi data, dan evaluasi/sanggahan ulang terhadap konteks <b>{getDynamicPrompt(formData.naskahText)}</b>!
-                        </p>
-                      </div>
-                      <textarea rows="6" placeholder="Uraikan aspek Polya..." value={formData.polyaText} onChange={(e) => setFormData({...formData, polyaText: e.target.value})} onPaste={() => setIsPasted(true)} style={{...styles.textarea, marginBottom: '20px'}} required />
+                          <div style={{...styles.promptBox, borderLeftColor: '#3b82f6'}}>
+                            <p style={{margin: '0 0 8px 0', fontWeight: 'bold', color: '#1d4ed8'}}>⚙️ Aspek Penyelesaian POLYA (4 Tahapan)</p>
+                            <p style={{margin: 0, fontSize: '12.5px', color: '#475569', lineHeight: '1.5'}}>
+                              <b>Pemantik:</b> Jabarkan pemahaman masalah, rencana pemecahan, eksekusi data, dan evaluasi/sanggahan ulang terhadap konteks <b>{getDynamicPrompt(formData.naskahText)}</b>!
+                            </p>
+                          </div>
+                          <textarea rows="6" placeholder="Uraikan aspek Polya secara original..." value={formData.polyaText} onChange={(e) => setFormData({...formData, polyaText: e.target.value})} onPaste={() => setIsPasted(true)} style={{...styles.textarea, marginBottom: '20px'}} required />
 
-                      <button type="submit" style={{...styles.btnPrimary, opacity: isSubmittingTask ? 0.7 : 1}} disabled={isSubmittingTask}>
-                        {isSubmittingTask ? 'Memproses Karya...' : isBypassAI ? 'Kirim Kanvas ke Guru' : 'Kunci Nalar & Dapatkan Penilaian AI'}
-                      </button>
-                    </form>
+                          <button type="submit" style={{...styles.btnPrimary, opacity: isSubmittingTask ? 0.7 : 1}} disabled={isSubmittingTask}>
+                            {isSubmittingTask ? 'Memproses Karya...' : isBypassAI ? 'Kirim Kanvas ke Guru' : 'Kunci Nalar & Dapatkan Evaluasi AI'}
+                          </button>
+                       </form>
+                    )}
                   </>
                 )}
               </div>
@@ -662,8 +709,8 @@ export default function App() {
                     </div>
 
                     <div style={{background: activePortfolio.diagnosis.includes('MANUAL') ? '#fefce8' : '#f0fdf4', padding: '15px', borderLeft: `4px solid ${activePortfolio.diagnosis.includes('MANUAL') ? '#eab308' : '#16a34a'}`, marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
-                      <p style={{margin: '0 0 8px 0', color: activePortfolio.diagnosis.includes('MANUAL') ? '#854d0e' : '#166534', display: 'flex', alignItems: 'center', gap: '5px'}}><b>🤖 Laporan Analisis Mesin AI:</b></p>
-                      <p style={{margin: 0, lineHeight: '1.6', fontSize: '13.5px', color: activePortfolio.diagnosis.includes('MANUAL') ? '#713f12' : '#14532d'}}>{activePortfolio.diagnosis}</p>
+                      <p style={{margin: '0 0 8px 0', color: activePortfolio.diagnosis.includes('MANUAL') ? '#854d0e' : '#166534', display: 'flex', alignItems: 'center', gap: '5px'}}><b>🤖 Laporan Evaluasi AI Pendidik:</b></p>
+                      <p style={{margin: 0, lineHeight: '1.6', fontSize: '13.5px', color: activePortfolio.diagnosis.includes('MANUAL') ? '#713f12' : '#14532d'}}>{activePortfolio.diagnosis.replace('[HASIL EVALUASI AI] ', '')}</p>
                     </div>
                     
                     {activePortfolio.teacherFeedback && (
@@ -707,7 +754,9 @@ export default function App() {
                             <tr key={sub.id} style={{borderBottom: '1px solid #f1f5f9', transition: 'all 0.2s'}}>
                               <td style={{padding: '15px 10px'}}>
                                 <b>{sub.studentName}</b><br/>
-                                <span style={{fontSize: '11.5px', color: '#64748b'}}>Pelanggaran: {sub.tabSwitches} Tab | Mode: <span style={{color: sub.diagnosis.includes('MANUAL') ? '#d97706' : sub.diagnosis.includes('GAGAL') || sub.diagnosis.includes('ERROR') ? '#dc2626' : '#16a34a', fontWeight: 'bold'}}>{sub.diagnosis.includes('MANUAL') ? 'Manual Guru' : sub.diagnosis.includes('GAGAL') || sub.diagnosis.includes('ERROR') ? 'Ditolak' : 'AI Lolos'}</span></span>
+                                <span style={{fontSize: '11.5px', color: '#64748b'}}>
+                                  Pelanggaran: <span style={{color: sub.tabSwitches > 0 || sub.hasCopyPasted ? '#dc2626' : '#16a34a', fontWeight: 'bold'}}>{sub.tabSwitches} Tab | {sub.hasCopyPasted ? 'Paste' : 'Aman'}</span>
+                                </span>
                               </td>
                               <td style={{padding: '15px 10px', fontWeight: '600', color: sub.status.includes('Ditolak') ? '#dc2626' : '#334155'}}>{sub.status}</td>
                               <td style={{padding: '15px 10px', textAlign: 'right'}} className="no-print">
@@ -755,7 +804,13 @@ export default function App() {
                 <div style={styles.modalCardLarge}>
                   <h3 style={{marginTop: 0, color: '#0f172a', fontSize: '20px'}}>Tinjauan Orisinalitas & Nalar</h3>
                   
-                  <div style={{fontSize: '13.5px', background: '#f8fafc', padding: '20px', borderRadius: '8px', margin: '20px 0', maxHeight: '350px', overflowY: 'auto', border: '1px solid #e2e8f0'}}>
+                  {(selectedSubmission.tabSwitches > 0 || selectedSubmission.hasCopyPasted) && (
+                     <div style={{background: '#fef2f2', borderLeft: '4px solid #dc2626', padding: '12px', marginBottom: '15px', borderRadius: '4px'}}>
+                        <p style={{margin: 0, color: '#b91c1c', fontSize: '13px', fontWeight: 'bold'}}>🚩 PERINGATAN KECURANGAN: Anak ini terdeteksi {selectedSubmission.tabSwitches > 0 ? `Pindah Tab ${selectedSubmission.tabSwitches} kali` : ''} {selectedSubmission.hasCopyPasted ? '& Melakukan Copy-Paste' : ''} saat menyusun argumen.</p>
+                     </div>
+                  )}
+
+                  <div style={{fontSize: '13.5px', background: '#f8fafc', padding: '20px', borderRadius: '8px', margin: '15px 0', maxHeight: '350px', overflowY: 'auto', border: '1px solid #e2e8f0'}}>
                     <div style={{display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #cbd5e1', paddingBottom: '10px', marginBottom: '15px'}}>
                       <p style={{margin: 0}}><b>Kreator:</b> {selectedSubmission.studentName}</p>
                       <p style={{margin: 0, color: '#64748b'}}>Waktu: {selectedSubmission.timestamp}</p>
@@ -768,8 +823,8 @@ export default function App() {
                     <div style={{whiteSpace: 'pre-wrap', color: '#1e293b', background: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', lineHeight: '1.6'}}>{selectedSubmission.deconstructionText}</div>
                     
                     <div style={{background: selectedSubmission.diagnosis.includes('MANUAL') ? '#fefce8' : '#f0fdf4', padding: '15px', borderLeft: `4px solid ${selectedSubmission.diagnosis.includes('MANUAL') ? '#eab308' : '#16a34a'}`, marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
-                      <p style={{margin: '0 0 5px 0', color: selectedSubmission.diagnosis.includes('MANUAL') ? '#854d0e' : '#166534'}}><b>🤖 Laporan Analisis Sistem:</b></p>
-                      <span style={{color: selectedSubmission.diagnosis.includes('MANUAL') ? '#713f12' : '#14532d', lineHeight: '1.6'}}>{selectedSubmission.diagnosis}</span>
+                      <p style={{margin: '0 0 5px 0', color: selectedSubmission.diagnosis.includes('MANUAL') ? '#854d0e' : '#166534'}}><b>🤖 Laporan Evaluasi AI Pendidik:</b></p>
+                      <span style={{color: selectedSubmission.diagnosis.includes('MANUAL') ? '#713f12' : '#14532d', lineHeight: '1.6'}}>{selectedSubmission.diagnosis.replace('[HASIL EVALUASI AI] ', '')}</span>
                     </div>
                   </div>
                   
