@@ -1,13 +1,25 @@
 import React, { useState, useEffect } from 'react';
 
 // ==========================================
-// SESSION HELPER & CONFIG
+// SESSION HELPER & CONFIG (BULLETPROOF FIXED)
 // ==========================================
 const session = {
-  set: (key, val) => localStorage.setItem(key, JSON.stringify(val)),
+  set: (key, val) => {
+    // Cegah React nulis string "null" atau "undefined" ke memori
+    if (val === null || val === undefined || val === 'null') {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, JSON.stringify(val));
+    }
+  },
   get: (key, fallback) => {
-    try { const item = localStorage.getItem(key); return item ? JSON.parse(item) : fallback; }
-    catch (e) { return fallback; }
+    try { 
+      const item = localStorage.getItem(key); 
+      // Amankan dari ghost cache
+      if (!item || item === 'null' || item === 'undefined') return fallback;
+      const parsed = JSON.parse(item);
+      return parsed !== null ? parsed : fallback;
+    } catch (e) { return fallback; }
   },
   clear: () => {
     ['PENA_ROLE', 'PENA_TAB', 'PENA_CLASS', 'PENA_STUDENT'].forEach(k => localStorage.removeItem(k));
@@ -15,17 +27,16 @@ const session = {
 };
 
 const MASTER_ADMIN_PASSWORD = "adminpena"; 
-const GEMINI_MODEL = "gemini-3.8-flash"; // ✅ KEMBALI KE VERSI ASLI YANG VALID
+const GEMINI_MODEL = "gemini-3.8-flash"; // AI SAKTI TERBUKTI JALAN
 
 // ==========================================
-// 🧠 OTAK AI SAKTI (CANGKOKAN DARI KODE LAMA)
+// 🧠 OTAK AI SAKTI (TIDAK DISENTUH)
 // ==========================================
 const callGeminiAPI = async (prompt, apiKey, retries = 3) => {
   if (!apiKey || !apiKey.trim()) throw new Error("API Key belum dimasukkan!");
 
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey.trim()}`;
   
-  // Struktur Payload yang Benar dari Kode Lama
   const payload = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }]
   };
@@ -38,10 +49,9 @@ const callGeminiAPI = async (prompt, apiKey, retries = 3) => {
         body: JSON.stringify(payload)
       });
 
-      // Fitur Auto-Retry dari Kode Lama
       if ((response.status === 429 || response.status >= 500) && attempt < retries - 1) {
         console.warn(`Server AI Google Sibuk (${response.status}). Mencoba ulang... (${attempt + 1}/${retries})`);
-        await new Promise(resolve => setTimeout(resolve, 3000)); // Sabar nunggu 3 detik
+        await new Promise(resolve => setTimeout(resolve, 3000)); 
         continue;
       }
 
@@ -85,7 +95,24 @@ export default function App() {
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [formData, setFormData] = useState({ naskahText: '', ennisText: '', polyaText: '' });
 
+  // 🛡️ AUTO-HEALING SYSTEM (MENCEGAH MURID NYASAR KE TAB GURU)
   useEffect(() => {
+    // Jika state rusak (Role Siswa tapi Data Siswa Hilang), logout paksa agar tidak blank
+    if ((userRole === 'siswa' || userRole === 'mandiri') && !currentStudent) {
+        handleLogout();
+        return;
+    }
+    // Jika murid refresh dan nyasar ke tab Guru, tendang balik ke tab siswa
+    if (userRole === 'siswa' || userRole === 'mandiri') {
+        if (activeTab === 'guruDashboard' || activeTab === 'guruSiswa') {
+            setActiveTab('introSiswa');
+        }
+    } else if (userRole === 'guru') {
+        if (activeTab !== 'guruDashboard' && activeTab !== 'guruSiswa') {
+            setActiveTab('guruDashboard');
+        }
+    }
+    
     session.set('PENA_ROLE', userRole);
     session.set('PENA_TAB', activeTab);
     session.set('PENA_CLASS', currentClass);
@@ -93,8 +120,11 @@ export default function App() {
   }, [userRole, activeTab, currentClass, currentStudent]);
 
   const [allClasses, setAllClasses] = useState(() => {
-    try { const saved = localStorage.getItem('PENA_ALL_CLASSES'); return saved ? JSON.parse(saved) : []; } 
-    catch (e) { return []; }
+    try { 
+      const saved = localStorage.getItem('PENA_ALL_CLASSES'); 
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) { return []; }
   });
 
   const [showAdminGate, setShowAdminGate] = useState(false);
@@ -118,12 +148,18 @@ export default function App() {
   const [students, setStudents] = useState([]);
   const [submissions, setSubmissions] = useState([]);
 
+  // 🛡️ SAFE ARRAY (ANTI-CRASH)
+  const safeSubmissions = Array.isArray(submissions) ? submissions : [];
+  const safeStudents = Array.isArray(students) ? students : [];
+
   useEffect(() => {
     const loadClassData = () => {
       if (userRole === 'mandiri' && currentStudent) {
         const keys = getStorageKeys(null, 'mandiri');
         const savedSub = localStorage.getItem(keys.submissions);
-        setSubmissions(savedSub ? JSON.parse(savedSub) : []);
+        let parsedSub = [];
+        try { if(savedSub) parsedSub = JSON.parse(savedSub); } catch(e){}
+        setSubmissions(Array.isArray(parsedSub) ? parsedSub : []);
         setStudents([]);
         return;
       }
@@ -132,15 +168,31 @@ export default function App() {
       const keys = getStorageKeys(currentClass, userRole);
       try {
         const savedStudents = localStorage.getItem(keys.students);
-        if (savedStudents) { setStudents(JSON.parse(savedStudents)); } 
-        else if (userRole === 'guru') {
+        let parsedStu = [];
+        if (savedStudents) {
+          try { parsedStu = JSON.parse(savedStudents); } catch(e){}
+        }
+        
+        if (Array.isArray(parsedStu) && parsedStu.length > 0) { 
+          setStudents(parsedStu); 
+        } else if (userRole === 'guru') {
           const defaultStudents = [{ id: 1, name: 'Siswa Contoh', pin: '1234' }];
           setStudents(defaultStudents);
           localStorage.setItem(keys.students, JSON.stringify(defaultStudents));
+        } else {
+          setStudents([]);
         }
+
         const savedSub = localStorage.getItem(keys.submissions);
-        setSubmissions(savedSub ? JSON.parse(savedSub) : []);
-      } catch (e) { console.error(e); }
+        let parsedSub = [];
+        if (savedSub) {
+          try { parsedSub = JSON.parse(savedSub); } catch(e){}
+        }
+        setSubmissions(Array.isArray(parsedSub) ? parsedSub : []);
+      } catch (e) { 
+        console.error(e); 
+        setSubmissions([]); setStudents([]);
+      }
     };
 
     loadClassData();
@@ -171,9 +223,15 @@ export default function App() {
     const inputName = loginStudentName.trim().toLowerCase();
     const keys = getStorageKeys(currentClass, 'siswa');
     const savedStu = localStorage.getItem(keys.students);
-    const freshStudentList = savedStu ? JSON.parse(savedStu) : [];
+    
+    let freshStudentList = [];
+    try { 
+      const parsed = JSON.parse(savedStu); 
+      if (Array.isArray(parsed)) freshStudentList = parsed;
+    } catch(err) {}
 
-    const student = freshStudentList.find(s => s.name.trim().toLowerCase() === inputName && s.pin === loginStudentPin.trim());
+    const student = freshStudentList.find(s => s?.name?.trim().toLowerCase() === inputName && s?.pin === loginStudentPin.trim());
+    
     if (student) {
       setCurrentStudent(student);
       setUserRole('siswa');
@@ -263,13 +321,13 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [activeTab, currentStudent]);
 
-  const activeSubmissionId = submissions.find(s => s.studentName === currentStudent?.name)?.id;
-  const activePortfolio = submissions.find(s => s.id === activeSubmissionId);
+  // Gunakan safeSubmissions untuk mencegah crash
+  const activeSubmissionId = safeSubmissions.find(s => s?.studentName === currentStudent?.name)?.id;
+  const activePortfolio = safeSubmissions.find(s => s?.id === activeSubmissionId);
   
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Karya Ditolak / Revisi';
   const isWorkspaceAllowed = isApiValid || isBypassAI; 
 
-  // 🔴 MENGGUNAKAN OTAK AI SAKTI UNTUK UJI PING
   const checkApiValidity = async (e) => {
     e.preventDefault();
     const cleanKey = apiKey.trim();
@@ -298,7 +356,6 @@ export default function App() {
     setActiveTab('workspace');
   };
 
-  // 🔴 MENGGUNAKAN OTAK AI SAKTI UNTUK PENILAIAN
   const handleSubmitCanvas = async (e) => {
     e.preventDefault();
     setIsSubmittingTask(true);
@@ -318,7 +375,6 @@ export default function App() {
       try {
         const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
         
-        // Panggil AI dengan fitur Retry 3x
         const aiResponse = await callGeminiAPI(prompt, activeKeyToUse, 3);
         diagnosis = `[HASIL EVALUASI AI] ${aiResponse}`;
 
@@ -342,7 +398,7 @@ export default function App() {
       teacherFeedback: ''
     };
     
-    const updatedSubmissions = [newSubmission, ...submissions.filter(s => s.studentName !== currentStudent.name)];
+    const updatedSubmissions = [newSubmission, ...safeSubmissions.filter(s => s.studentName !== currentStudent.name)];
     setSubmissions(updatedSubmissions);
     
     const keys = getStorageKeys(currentClass, userRole);
@@ -356,7 +412,7 @@ export default function App() {
   const [teacherNoteInput, setTeacherNoteInput] = useState('');
 
   const handleTeacherAction = (id, status) => {
-    const updatedSubmissions = submissions.map(item => item.id === id ? { ...item, status, teacherFeedback: teacherNoteInput } : item);
+    const updatedSubmissions = safeSubmissions.map(item => item.id === id ? { ...item, status, teacherFeedback: teacherNoteInput } : item);
     setSubmissions(updatedSubmissions);
     const keys = getStorageKeys(currentClass, userRole);
     localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
@@ -365,7 +421,7 @@ export default function App() {
 
   const handleDeleteSubmission = (id) => {
     if(window.confirm('Yakin ingin menghapus hasil evaluasi siswa ini? Siswa harus mengulang tugasnya dari awal.')){
-      const updatedSubmissions = submissions.filter(item => item.id !== id);
+      const updatedSubmissions = safeSubmissions.filter(item => item.id !== id);
       setSubmissions(updatedSubmissions);
       const keys = getStorageKeys(currentClass, userRole);
       localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
@@ -373,7 +429,7 @@ export default function App() {
   };
 
   const handleExportCSV = () => {
-    if(submissions.length === 0) { alert("Tidak ada data untuk diekspor"); return; }
+    if(safeSubmissions.length === 0) { alert("Tidak ada data untuk diekspor"); return; }
     
     const sanitize = (str) => {
       if(!str) return '""';
@@ -382,7 +438,7 @@ export default function App() {
     };
 
     const headers = ["ID Validasi", "Nama Siswa", "Waktu", "Status Putusan", "Pindah Tab", "Kutipan Naskah", "Uraian Siswa", "Laporan Hasil AI", "Catatan Guru"];
-    const rows = submissions.map(s => [
+    const rows = safeSubmissions.map(s => [
       sanitize(s.certNumber), sanitize(s.studentName), sanitize(s.timestamp), sanitize(s.status), 
       s.tabSwitches, sanitize(s.naskahText), sanitize(s.deconstructionText), 
       sanitize(s.diagnosis), sanitize(s.teacherFeedback)
@@ -701,7 +757,7 @@ export default function App() {
                     </div>
                   </div>
                   
-                  {submissions.length === 0 ? <p style={{color: '#64748b', fontSize: '14px', background: '#f8fafc', padding: '20px', borderRadius: '6px', textAlign: 'center'}}>Belum ada artefak siswa yang masuk ke dalam sistem evaluasi.</p> : (
+                  {safeSubmissions.length === 0 ? <p style={{color: '#64748b', fontSize: '14px', background: '#f8fafc', padding: '20px', borderRadius: '6px', textAlign: 'center'}}>Belum ada artefak siswa yang masuk ke dalam sistem evaluasi.</p> : (
                     <div style={{overflowX: 'auto'}}>
                       <table style={styles.table}>
                         <thead>
@@ -712,7 +768,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {submissions.map(sub => (
+                          {safeSubmissions.map(sub => (
                             <tr key={sub.id} style={{borderBottom: '1px solid #f1f5f9', transition: 'all 0.2s'}}>
                               <td style={{padding: '15px 10px'}}>
                                 <b>{sub.studentName}</b><br/>
@@ -748,7 +804,7 @@ export default function App() {
                   const name = e.target.sName.value.trim();
                   if(name) {
                     const pin = Math.floor(1000 + Math.random() * 9000).toString();
-                    const newStudents = [...students, { id: Date.now(), name, pin }];
+                    const newStudents = [...safeStudents, { id: Date.now(), name, pin }];
                     setStudents(newStudents);
                     const keys = getStorageKeys(currentClass, userRole);
                     localStorage.setItem(keys.students, JSON.stringify(newStudents));
@@ -760,11 +816,11 @@ export default function App() {
                 </form>
                 
                 <ul style={{paddingLeft: 0, listStyle: 'none', fontSize: '14px', color: '#334155'}}>
-                  {students.map(s => (
+                  {safeStudents.map(s => (
                     <li key={s.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 12px', borderBottom: '1px solid #f1f5f9', background: '#fafafa', borderRadius: '6px', marginBottom: '8px'}}>
                       <span><b>{s.name}</b> <span style={{margin: '0 10px', color: '#cbd5e1'}}>|</span> PIN Autentikasi: <span style={{color: '#dc2626', fontWeight: '900', letterSpacing: '1px'}}>{s.pin}</span></span>
                       <button style={{background: 'none', border: 'none', color: '#b91c1c', cursor: 'pointer', fontWeight: '700', padding: '5px 10px', borderRadius: '4px'}} onClick={() => {
-                        const updated = students.filter(st => st.id !== s.id);
+                        const updated = safeStudents.filter(st => st.id !== s.id);
                         setStudents(updated);
                         localStorage.setItem(getStorageKeys(currentClass, userRole).students, JSON.stringify(updated));
                       }}>Cabut Akses</button>
