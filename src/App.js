@@ -15,6 +15,51 @@ const session = {
 };
 
 const MASTER_ADMIN_PASSWORD = "adminpena"; 
+const GEMINI_MODEL = "gemini-1.5-flash"; // ✅ KEMBALI KE VERSI ASLI YANG VALID
+
+// ==========================================
+// 🧠 OTAK AI SAKTI (CANGKOKAN DARI KODE LAMA)
+// ==========================================
+const callGeminiAPI = async (prompt, apiKey, retries = 3) => {
+  if (!apiKey || !apiKey.trim()) throw new Error("API Key belum dimasukkan!");
+
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey.trim()}`;
+  
+  // Struktur Payload yang Benar dari Kode Lama
+  const payload = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }]
+  };
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      // Fitur Auto-Retry dari Kode Lama
+      if ((response.status === 429 || response.status >= 500) && attempt < retries - 1) {
+        console.warn(`Server AI Google Sibuk (${response.status}). Mencoba ulang... (${attempt + 1}/${retries})`);
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Sabar nunggu 3 detik
+        continue;
+      }
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Ditolak Google (Status ${response.status}): ${errText}`);
+      }
+
+      const result = await response.json();
+      if (result.candidates && result.candidates.length > 0) {
+        return result.candidates[0].content.parts[0].text;
+      }
+      throw new Error("Format respon AI tidak terbaca");
+    } catch (err) {
+      if (attempt === retries - 1) throw err;
+    }
+  }
+};
 
 export default function App() {
   const [userRole, setUserRole] = useState(() => session.get('PENA_ROLE', null)); 
@@ -22,7 +67,6 @@ export default function App() {
   const [currentClass, setCurrentClass] = useState(() => session.get('PENA_CLASS', null));
   const [currentStudent, setCurrentStudent] = useState(() => session.get('PENA_STUDENT', null));
   
-  // Deteksi kunci Vercel atau Lokal
   const defaultSysKey = process.env.REACT_APP_GEMINI_API_KEY || "";
   const [apiKey, setApiKey] = useState(() => {
     return localStorage.getItem('PENA_AI_KEY') || defaultSysKey;
@@ -33,12 +77,10 @@ export default function App() {
     return active.length > 5;
   });
 
-  // State mutlak untuk Bypass AI (Lanjut tanpa AI)
   const [isBypassAI, setIsBypassAI] = useState(false);
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
   const [isValidatingApi, setIsValidatingApi] = useState(false);
 
-  // KANVAS STATE
   const [isPasted, setIsPasted] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [formData, setFormData] = useState({ naskahText: '', ennisText: '', polyaText: '' });
@@ -100,15 +142,11 @@ export default function App() {
         setSubmissions(savedSub ? JSON.parse(savedSub) : []);
       } catch (e) { console.error(e); }
     };
+
     loadClassData();
     window.addEventListener('storage', loadClassData);
     return () => window.removeEventListener('storage', loadClassData);
   }, [currentClass, userRole, currentStudent]);
-
-  // --- LOGIN LOGIC ---
-  const [classCodeInput, setClassCodeInput] = useState('');
-  const [loginStudentName, setLoginStudentName] = useState('');
-  const [loginStudentPin, setLoginStudentPin] = useState('');
 
   const resetCanvasState = () => {
     setFormData({ naskahText: '', ennisText: '', polyaText: '' });
@@ -140,8 +178,8 @@ export default function App() {
       setCurrentStudent(student);
       setUserRole('siswa');
       setIsBypassAI(false);
-      resetCanvasState();
-      setActiveTab('introSiswa');
+      resetCanvasState(); 
+      setActiveTab('introSiswa'); 
     } else {
       alert('❌ Nama atau PIN Siswa salah.');
     }
@@ -201,10 +239,10 @@ export default function App() {
     setUserRole('mandiri'); 
     setSubmissions([]); 
     setIsBypassAI(false);
-    resetCanvasState();
+    resetCanvasState(); 
     
     setShowMandiriModal(false); 
-    setActiveTab('introSiswa');
+    setActiveTab('introSiswa'); 
   };
 
   const handleLogout = () => {
@@ -218,7 +256,6 @@ export default function App() {
     setIsApiValid(false);
   };
 
-  // --- KANVAS & API LOGIC ---
   useEffect(() => {
     if (activeTab !== 'workspace' || !currentStudent) return;
     const handleVisibilityChange = () => { if (document.hidden) setTabSwitchCount(prev => prev + 1); };
@@ -228,63 +265,31 @@ export default function App() {
 
   const activeSubmissionId = submissions.find(s => s.studentName === currentStudent?.name)?.id;
   const activePortfolio = submissions.find(s => s.id === activeSubmissionId);
+  
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Karya Ditolak / Revisi';
   const isWorkspaceAllowed = isApiValid || isBypassAI; 
 
-  // ==========================================
-  // API LOGIC 1: CEK PING (GEMINI-2.0-FLASH)
-  // ==========================================
+  // 🔴 MENGGUNAKAN OTAK AI SAKTI UNTUK UJI PING
   const checkApiValidity = async (e) => {
     e.preventDefault();
     const cleanKey = apiKey.trim();
     if (cleanKey.length < 5) { alert('❌ API Key tidak valid.'); return; }
-
+    
     setIsValidatingApi(true);
-    setIsApiValid(false);
-
-    let retries = 3;
-    let success = false;
-
-    while (retries > 0 && !success) {
-      try {
-        // MENGGUNAKAN MODEL 2.0-FLASH TERBARU YANG DIDUKUNG SERVER
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${cleanKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: "Balas dengan kata: KONEKSI OK" }] }] })
-        });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error?.message || "Koneksi ditolak Google API.");
-
-        localStorage.setItem('PENA_AI_KEY', cleanKey);
-        setIsApiValid(true);
-        setIsBypassAI(false);
-        success = true;
-
-        setTimeout(() => {
-          alert('✅ Kunci Tervalidasi Google! Segel Kanvas Terbuka.');
-          setActiveTab('workspace');
-        }, 100);
-
-      } catch (err) {
-        if (err.message.toLowerCase().includes("high demand") || err.message.toLowerCase().includes("quota") || err.message.toLowerCase().includes("overloaded")) {
-          retries--;
-          if (retries > 0) {
-            console.log(`Server sibuk. Gedor ulang... sisa ${retries} percobaan.`);
-            await new Promise(r => setTimeout(r, 2000));
-          } else {
-            setIsApiValid(false);
-            setTimeout(() => { alert(`❌ SERVER GOOGLE SEDANG PENUH!\nAntrean gratisan macet. Silakan tunggu beberapa saat lalu klik Uji Ping lagi.`); }, 100);
-          }
-        } else {
-          retries = 0;
-          setIsApiValid(false);
-          setTimeout(() => { alert(`❌ UJI PING GAGAL!\nDetail: ${err.message}`); }, 100);
-        }
-      }
+    try {
+      await callGeminiAPI("Balas dengan kata: KONEKSI OK", cleanKey, 2);
+      
+      localStorage.setItem('PENA_AI_KEY', cleanKey);
+      setIsApiValid(true);
+      setIsBypassAI(false);
+      alert('✅ Kunci Tervalidasi Google! Segel Kanvas Terbuka.');
+      setActiveTab('workspace');
+    } catch (err) {
+      setIsApiValid(false);
+      alert(`❌ UJI PING GAGAL!\nPastikan API Key valid dan bukan akun di bawah 18 tahun.\n\nDetail: ${err.message}`);
+    } finally {
+      setIsValidatingApi(false);
     }
-    setIsValidatingApi(false);
   };
 
   const handleBypassAI = () => {
@@ -293,9 +298,7 @@ export default function App() {
     setActiveTab('workspace');
   };
 
-  // ==========================================
-  // API LOGIC 2: SUBMIT KANVAS (GEMINI-2.0-FLASH)
-  // ==========================================
+  // 🔴 MENGGUNAKAN OTAK AI SAKTI UNTUK PENILAIAN
   const handleSubmitCanvas = async (e) => {
     e.preventDefault();
     setIsSubmittingTask(true);
@@ -312,47 +315,20 @@ export default function App() {
         alert('API Key tidak ditemukan. Silakan atur kembali di Pengaturan API Key.');
         setActiveTab('introSiswa'); setIsSubmittingTask(false); return;
       }
+      try {
+        const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
+        
+        // Panggil AI dengan fitur Retry 3x
+        const aiResponse = await callGeminiAPI(prompt, activeKeyToUse, 3);
+        diagnosis = `[HASIL EVALUASI AI] ${aiResponse}`;
 
-      let retries = 3;
-      let success = false;
-
-      while (retries > 0 && !success) {
-        try {
-          const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
-          
-          // MENGGUNAKAN MODEL 2.0-FLASH TERBARU
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${activeKeyToUse}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-          });
-          const data = await res.json();
-          
-          if (!res.ok) throw new Error(data.error?.message || "Sistem AI tidak merespons dengan baik.");
-          
-          if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
-            diagnosis = `[HASIL EVALUASI AI] ${data.candidates[0].content.parts[0].text}`;
-            success = true;
-          } else {
-            throw new Error("Respon diblokir keamanan server.");
-          }
-        } catch (err) {
-          if (err.message.toLowerCase().includes("high demand") || err.message.toLowerCase().includes("quota") || err.message.toLowerCase().includes("overloaded")) {
-            retries--;
-            if (retries > 0) {
-              console.log(`Server sibuk saat analisis. Gedor ulang... sisa ${retries} percobaan.`);
-              await new Promise(r => setTimeout(r, 2500));
-            } else {
-              diagnosis = `[ERROR SERVER SIBUK] Mesin AI Google menolak respon (High Demand). Silakan hapus karya ini dan kirim ulang tugasnya beberapa saat lagi.`;
-            }
-          } else {
-            retries = 0;
-            diagnosis = `[ERROR KONEKSI AI] Gagal memproses nalar. Detail: ${err.message}.`;
-          }
-        }
+      } catch (err) {
+        diagnosis = `[ERROR KONEKSI AI] Gagal menghubungi mesin analitis. Detail: ${err.message}.`;
       }
     }
 
     const combinedDeconstruction = `[ENNIS]: ${formData.ennisText}\n\n[POLYA]: ${formData.polyaText}`;
+
     const newSubmission = {
       id: Date.now(),
       certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -376,7 +352,6 @@ export default function App() {
     setActiveTab('portfolio');
   };
 
-  // --- FUNGSI GURU ---
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [teacherNoteInput, setTeacherNoteInput] = useState('');
 
@@ -397,9 +372,9 @@ export default function App() {
     }
   };
 
-  // CSV EXPORT 
   const handleExportCSV = () => {
     if(submissions.length === 0) { alert("Tidak ada data untuk diekspor"); return; }
+    
     const sanitize = (str) => {
       if(!str) return '""';
       const cleanStr = str.replace(/[\r\n]+/g, ' ').replace(/"/g, '""');
@@ -446,7 +421,6 @@ export default function App() {
         {userRole && <button style={styles.textBtn} onClick={handleLogout}>Keluar Sesi</button>}
       </header>
 
-      {/* LANDING PAGE UTAMA */}
       {!userRole && activeTab === 'landing' && (
         <div style={styles.card} className="no-print">
           <h1 style={styles.title}>Platform Pertanggungjawaban Nalar</h1>
@@ -555,15 +529,14 @@ export default function App() {
               
               <button 
                 style={activeTab === 'workspace' ? styles.navActive : (!isWorkspaceAllowed ? {...styles.navBtn, opacity: 0.5, cursor: 'not-allowed'} : styles.navBtn)} 
-                onClick={() => { if(isWorkspaceAllowed) setActiveTab('workspace') }} 
+                onClick={() => { if(isWorkspaceAllowed) setActiveTab('workspace') }}
                 disabled={!isWorkspaceAllowed}
               >
                 Kanvas Pemikiran
               </button>
-              
               <button 
                 style={activeTab === 'portfolio' ? styles.navActive : (!isWorkspaceAllowed ? {...styles.navBtn, opacity: 0.5, cursor: 'not-allowed'} : styles.navBtn)} 
-                onClick={() => { if(isWorkspaceAllowed) setActiveTab('portfolio') }} 
+                onClick={() => { if(isWorkspaceAllowed) setActiveTab('portfolio') }}
                 disabled={!isWorkspaceAllowed}
               >
                 Portofolio AI
@@ -587,11 +560,11 @@ export default function App() {
               <div style={styles.card} className="no-print">
                 <h2>Konfigurasi Sistem Evaluasi</h2>
                 
-                <div style={{...styles.introBox, background: isApiValid ? '#f0fdf4' : (isValidatingApi ? '#eff6ff' : '#fefce8'), borderColor: isApiValid ? '#bbf7d0' : (isValidatingApi ? '#bfdbfe' : '#fef08a')}}>
-                  <p style={{margin: '0 0 8px 0', color: isApiValid ? '#166534' : (isValidatingApi ? '#1e3a8a' : '#854d0e')}}>
-                    <b>Status Sistem Vercel Saat Ini: {isApiValid ? '✅ Siap (Tinggal Gas)' : (isValidatingApi ? '⏳ Sedang Menguji Koneksi...' : '⚠️ Terkena Limit / Kosong')}</b>
+                <div style={{...styles.introBox, background: isApiValid ? '#f0fdf4' : '#fefce8', borderColor: isApiValid ? '#bbf7d0' : '#fef08a'}}>
+                  <p style={{margin: '0 0 8px 0', color: isApiValid ? '#166534' : '#854d0e'}}>
+                    <b>Status Sistem Vercel Saat Ini: {isApiValid ? '✅ Siap (Tinggal Gas)' : '⚠️ Terkena Limit / Kosong'}</b>
                   </p>
-                  {!isApiValid && !isValidatingApi && (
+                  {!isApiValid && (
                     <p style={{margin: 0, fontSize: '13.5px', color: '#475569', lineHeight: '1.6'}}>Sistem Utama AI belum mendeteksi sesi aktif. Selesaikan opsi di bawah untuk membuka segel Kanvas.</p>
                   )}
                 </div>
@@ -599,11 +572,12 @@ export default function App() {
                 <div style={{display: 'flex', flexDirection: 'column', gap: '30px'}}>
                   <div style={{border: '1px solid #e2e8f0', padding: '20px', borderRadius: '8px'}}>
                     <h3 style={{marginTop: 0, color: '#0f172a'}}>Opsi Utama: Validasi Kunci AI Pribadi</h3>
-                    <p style={{fontSize: '13px', color: '#475569', lineHeight: '1.6'}}>Mesin AI Gemini mengunci akses tanpa API Key yang sah. Dapatkan kunci AQ... di <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 'bold'}}>Google AI Studio</a>.</p>
+                    <p style={{fontSize: '13px', color: '#475569', lineHeight: '1.6'}}>Mesin AI Gemini mengunci akses tanpa API Key yang sah. Dapatkan kunci AQ... di <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 'bold'}}>Google AI Studio</a>. <br/><b style={{color: '#dc2626'}}>(Catatan: Wajib gunakan email @gmail.com pribadi dan setelan usia akun 18+ agar tidak diblokir Google).</b></p>
+                    
                     <form onSubmit={checkApiValidity}>
                       <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{...styles.input, marginTop: '8px'}} placeholder="Tempel kunci API AQ... di sini..." required />
                       <button type="submit" style={{...styles.btnPrimary, marginTop: '15px', background: '#0f172a'}} disabled={isValidatingApi}>
-                        {isValidatingApi ? 'Menembus Antrean Google...' : 'Uji Ping & Buka Segel Kanvas'}
+                        {isValidatingApi ? 'Menguji Koneksi Google...' : 'Uji Ping & Buka Segel Kanvas'}
                       </button>
                     </form>
                   </div>
@@ -667,7 +641,7 @@ export default function App() {
                       <textarea rows="6" placeholder="Uraikan aspek Polya..." value={formData.polyaText} onChange={(e) => setFormData({...formData, polyaText: e.target.value})} onPaste={() => setIsPasted(true)} style={{...styles.textarea, marginBottom: '20px'}} required />
 
                       <button type="submit" style={{...styles.btnPrimary, opacity: isSubmittingTask ? 0.7 : 1}} disabled={isSubmittingTask}>
-                        {isSubmittingTask ? 'Menembus Antrean AI (Loading)...' : isBypassAI ? 'Kirim Kanvas ke Guru' : 'Kunci Nalar & Dapatkan Penilaian AI'}
+                        {isSubmittingTask ? 'Memproses Karya...' : isBypassAI ? 'Kirim Kanvas ke Guru' : 'Kunci Nalar & Dapatkan Penilaian AI'}
                       </button>
                     </form>
                   </>
