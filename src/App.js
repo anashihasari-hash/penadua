@@ -241,7 +241,7 @@ export default function App() {
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Karya Ditolak / Revisi';
   const isWorkspaceAllowed = isApiValid || isBypassAI; // GATEKEEPER NAVIGATION
 
-  // 🔴 FITUR PING TEST API (Validasi Real-time Server Gemini 2.5)
+  // 🔴 FITUR PING TEST API (Validasi Real-time Server Gemini 3.8-flash)
   const checkApiValidity = async (e) => {
     e.preventDefault();
     const cleanKey = apiKey.trim();
@@ -249,7 +249,8 @@ export default function App() {
     
     setIsValidatingApi(true);
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${cleanKey}`, {
+      // 🟢 FIX: UPDATE KE MODEL gemini-3.8-flash
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${cleanKey}`, {
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: "Balas dengan kata: KONEKSI OK" }] }] })
@@ -289,7 +290,7 @@ export default function App() {
       // JIKA BYPASS AI DIAKTIFKAN
       diagnosis = `[EVALUASI MANUAL] Mesin AI dinonaktifkan oleh pengguna. Menunggu tinjauan langsung dan validasi dari Guru.`;
     } else {
-      // PROSES NORMAL DENGAN AI (Gemini 2.5)
+      // PROSES NORMAL DENGAN AI 
       const activeKeyToUse = localStorage.getItem('PENA_AI_KEY') || defaultSysKey;
       if (!activeKeyToUse) {
         alert('API Key tidak ditemukan. Silakan atur kembali di Pengaturan API Key.');
@@ -298,8 +299,8 @@ export default function App() {
       try {
         const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
         
-        // 🔴 FIX: GANTI KE GEMINI 2.5 FLASH
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKeyToUse}`, {
+        // 🟢 FIX: UPDATE KE MODEL gemini-3.8-flash
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${activeKeyToUse}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
         });
@@ -571,7 +572,9 @@ export default function App() {
                   {/* OPSI 1: API MANDIRI (UJI PING NYATA) */}
                   <div style={{border: '1px solid #e2e8f0', padding: '20px', borderRadius: '8px'}}>
                     <h3 style={{marginTop: 0, color: '#0f172a'}}>Opsi Utama: Validasi Kunci AI Pribadi</h3>
-                    <p style={{fontSize: '13px', color: '#475569', lineHeight: '1.6'}}>Mesin AI Gemini mengunci akses tanpa API Key yang sah. Dapatkan kunci AQ... di <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 'bold'}}>Google AI Studio</a>.</p>
+                    {/* 🟢 FIX: TAMBAHAN TEKS PERINGATAN UMUR DAN EMAIL GMAIL */}
+                    <p style={{fontSize: '13px', color: '#475569', lineHeight: '1.6'}}>Mesin AI Gemini mengunci akses tanpa API Key yang sah. Dapatkan kunci AQ... di <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 'bold'}}>Google AI Studio</a>. <br/><b style={{color: '#dc2626'}}>(Catatan: Wajib gunakan email @gmail.com pribadi dan setelan usia akun 18+ agar tidak diblokir Google).</b></p>
+                    
                     <form onSubmit={checkApiValidity}>
                       <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{...styles.input, marginTop: '8px'}} placeholder="Tempel kunci API AQ... di sini..." required />
                       <button type="submit" style={{...styles.btnPrimary, marginTop: '15px', background: '#0f172a'}} disabled={isValidatingApi}>
