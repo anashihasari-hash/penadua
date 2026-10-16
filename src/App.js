@@ -40,8 +40,21 @@ const session = {
 const MASTER_ADMIN_PASSWORD = "adminpena"; 
 const GEMINI_MODEL = "gemini-3.8-flash"; 
 
+// 9 INDIKATOR FUNDAMENTAL BAWAAN (ENNIS & POLYA)
+const DEFAULT_INDICATORS = [
+  { id: 'e1', name: 'Ennis 1: Penjelasan Sederhana', prompt: 'Fokuskan pertanyaan, analisis argumen, dan klarifikasi makna dari naskah.' },
+  { id: 'e2', name: 'Ennis 2: Keterampilan Dasar', prompt: 'Evaluasi kredibilitas sumber dan hasil observasi pada masalah tersebut.' },
+  { id: 'e3', name: 'Ennis 3: Deduksi & Induksi', prompt: 'Uraikan deduksi/induksi yang logis serta evaluasi kesimpulan masalah.' },
+  { id: 'e4', name: 'Ennis 4: Penjelasan Lanjut', prompt: 'Identifikasi asumsi tersembunyi dan definisikan istilah dengan tepat.' },
+  { id: 'e5', name: 'Ennis 5: Strategi & Taktik', prompt: 'Tentukan tindakan strategis dan taktis logis untuk penyelesaiannya.' },
+  { id: 'p1', name: 'Polya 1: Memahami Masalah', prompt: 'Apa yang tidak diketahui? Data apa yang diberikan? Identifikasi kondisi utama.' },
+  { id: 'p2', name: 'Polya 2: Menyusun Rencana', prompt: 'Temukan hubungan data. Susun rencana pemecahan strategis.' },
+  { id: 'p3', name: 'Polya 3: Melaksanakan Rencana', prompt: 'Eksekusi rencana penyelesaian masalah dan periksa setiap langkah secara logis.' },
+  { id: 'p4', name: 'Polya 4: Melihat Kembali', prompt: 'Evaluasi solusi yang didapat, periksa argumen, dan sanggah jika ada kontradiksi.' }
+];
+
 // ==========================================
-// 🧠 OTAK AI PENDIDIK (PROMPT DIPERBARUI)
+// 🧠 OTAK AI PENDIDIK (PROMPT DINAMIS)
 // ==========================================
 const callGeminiAPI = async (prompt, apiKey, retries = 3) => {
   if (!apiKey || !apiKey.trim()) throw new Error("API Key belum dimasukkan!");
@@ -92,16 +105,22 @@ export default function App() {
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
   const [isValidatingApi, setIsValidatingApi] = useState(false);
 
-  // STATE KANVAS DUA TAHAP
+  // STATE KANVAS (MULTIPLE INDIKATOR DINAMIS)
   const [isKutipanLocked, setIsKutipanLocked] = useState(false);
   const [isPasted, setIsPasted] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
-  const [formData, setFormData] = useState({ naskahText: '', ennisText: '', polyaText: '' });
+  const [naskahText, setNaskahText] = useState('');
+  const [answers, setAnswers] = useState({}); // Menyimpan jawaban per indikator
 
-  // STATE FIREBASE LINTAS HP
+  // STATE FIREBASE
   const [allClasses, setAllClasses] = useState([]);
   const [students, setStudents] = useState([]);
   const [submissions, setSubmissions] = useState([]);
+
+  // STATE MANAJEMEN INDIKATOR GURU
+  const [localIndicators, setLocalIndicators] = useState([]);
+  const [newIndName, setNewIndName] = useState('');
+  const [newIndPrompt, setNewIndPrompt] = useState('');
 
   const [showAdminGate, setShowAdminGate] = useState(false);
   const [adminGateInput, setAdminGateInput] = useState('');
@@ -113,6 +132,20 @@ export default function App() {
 
   const [showMandiriModal, setShowMandiriModal] = useState(false);
   const [mandiriNameInput, setMandiriNameInput] = useState('');
+  const [selectedSubmission, setSelectedSubmission] = useState(null);
+  const [teacherNoteInput, setTeacherNoteInput] = useState('');
+
+  const activeIndicatorsList = userRole === 'mandiri' ? DEFAULT_INDICATORS : (currentClass?.indicators || DEFAULT_INDICATORS);
+
+  // 🛡️ SCROLL LOCK PADA POP-UP
+  useEffect(() => {
+    if (showAdminGate || showPinModal || showMandiriModal || selectedSubmission) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'auto';
+    }
+    return () => { document.body.style.overflow = 'auto'; };
+  }, [showAdminGate, showPinModal, showMandiriModal, selectedSubmission]);
 
   const doLogout = () => {
     session.clear(); 
@@ -133,23 +166,32 @@ export default function App() {
         doLogout(); return;
     }
     if (userRole === 'siswa' || userRole === 'mandiri') {
-        if (activeTab === 'guruDashboard' || activeTab === 'guruSiswa') setActiveTab('introSiswa');
+        if (activeTab === 'guruDashboard' || activeTab === 'guruSiswa' || activeTab === 'guruIndikator') setActiveTab('introSiswa');
     } else if (userRole === 'guru') {
-        if (activeTab !== 'guruDashboard' && activeTab !== 'guruSiswa') setActiveTab('guruDashboard');
+        if (activeTab !== 'guruDashboard' && activeTab !== 'guruSiswa' && activeTab !== 'guruIndikator') setActiveTab('guruDashboard');
     }
     session.set('PENA_ROLE', userRole); session.set('PENA_TAB', activeTab);
     session.set('PENA_CLASS', currentClass); session.set('PENA_STUDENT', currentStudent);
   }, [userRole, activeTab, currentClass, currentStudent]);
 
-  // 🔥 TARIK DATA KELAS DARI FIREBASE REAL-TIME
+  // 🔥 TARIK DATA KELAS REAL-TIME
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'classes'), (snap) => {
       const cls = [];
       snap.forEach(d => cls.push({ id: d.id, ...d.data() })); 
       setAllClasses(cls);
+      
+      // Update state indikator guru jika kelas berubah di DB
+      if (currentClass) {
+         const updatedClass = cls.find(c => c.id === currentClass.id);
+         if (updatedClass) {
+             setCurrentClass(updatedClass);
+             setLocalIndicators(updatedClass.indicators || DEFAULT_INDICATORS);
+         }
+      }
     });
     return () => unsub();
-  }, []);
+  }, [currentClass?.id]); // HANYA rerender jika id kelas yang aktif berubah
 
   // 🔥 TARIK DATA SISWA & TUGAS
   useEffect(() => {
@@ -192,7 +234,7 @@ export default function App() {
   }, [currentClass, userRole, currentStudent]);
 
   const resetCanvasState = () => {
-    setFormData({ naskahText: '', ennisText: '', polyaText: '' });
+    setNaskahText(''); setAnswers({});
     setIsPasted(false); setTabSwitchCount(0); setIsKutipanLocked(false);
   };
 
@@ -220,7 +262,7 @@ export default function App() {
     if (adminGateInput === MASTER_ADMIN_PASSWORD) {
       setShowAdminGate(false); setTeacherNameInput(''); setSubjectInput(''); setPinInput('');
       setShowPinModal(true); setAdminGateInput('');
-    } else { alert('❌ Sandi Admin salah.'); }
+    } else { alert('❌ Sandi Admin salah. Silakan hubungi admin.'); }
   };
 
   const handleRegisterOrLoginGuru = async (e) => {
@@ -235,12 +277,12 @@ export default function App() {
       if (targetClass.pin !== pin) { alert('❌ Sandi (PIN) guru salah!'); return; } 
     } else {
       const classCode = Math.floor(10000 + Math.random() * 90000).toString();
-      targetClass = { teacher: tName, subject: sName, pin: pin, classCode: classCode };
+      targetClass = { teacher: tName, subject: sName, pin: pin, classCode: classCode, indicators: DEFAULT_INDICATORS };
       await addDoc(collection(db, 'classes'), targetClass);
       alert(`🎉 KELAS DIBUAT!\nKODE AKSES MURID: ${classCode}`);
     }
     
-    setCurrentClass(targetClass); setUserRole('guru');
+    setCurrentClass(targetClass); setUserRole('guru'); setLocalIndicators(targetClass.indicators || DEFAULT_INDICATORS);
     setShowPinModal(false); setActiveTab('guruDashboard');
   };
 
@@ -254,6 +296,25 @@ export default function App() {
         alert('Histori kelas dibersihkan.');
       }
     }
+  };
+
+  // FUNGSI MANAJEMEN INDIKATOR GURU
+  const handleAddIndicator = () => {
+     if (localIndicators.length >= 10) { alert('Maksimal 10 Indikator.'); return; }
+     if (!newIndName.trim() || !newIndPrompt.trim()) return;
+     const baru = { id: `ind-${Date.now()}`, name: newIndName.trim(), prompt: newIndPrompt.trim() };
+     setLocalIndicators([...localIndicators, baru]);
+     setNewIndName(''); setNewIndPrompt('');
+  };
+  const handleRemoveIndicator = (id) => {
+     if (localIndicators.length <= 1) { alert('Kelas minimal memiliki 1 indikator analisis.'); return; }
+     setLocalIndicators(localIndicators.filter(i => i.id !== id));
+  };
+  const handleSaveIndicatorsToDB = async () => {
+     try {
+       await updateDoc(doc(db, 'classes', currentClass.id), { indicators: localIndicators });
+       alert('✅ Indikator berhasil disimpan & diperbarui untuk siswa!');
+     } catch (err) { alert('Gagal menyimpan indikator: ' + err.message); }
   };
 
   const handleMandiriLogin = (e) => {
@@ -305,38 +366,53 @@ export default function App() {
   };
 
   const handleLockKutipan = () => {
-    if (formData.naskahText.trim().length < 15) {
+    if (naskahText.trim().length < 15) {
       alert('Kutipan naskah terlalu pendek, silakan lengkapi dulu.'); return;
     }
     setIsKutipanLocked(true);
   };
 
+  const handleAnswerChange = (id, text) => {
+    setAnswers({ ...answers, [id]: text });
+  };
+
   const handleSubmitCanvas = async (e) => {
     e.preventDefault();
+    
+    // Cek apakah semua indikator sudah diisi
+    const incomplete = activeIndicatorsList.some(ind => !answers[ind.id] || answers[ind.id].trim() === '');
+    if (incomplete) { alert('Mohon lengkapi seluruh uraian analisis sebelum mengirim.'); return; }
+
     setIsSubmittingTask(true);
     let diagnosis = "";
+
+    // GABUNGKAN DEKONSTRUKSI
+    let combinedDeconstruction = "";
+    activeIndicatorsList.forEach((ind) => {
+       combinedDeconstruction += `[${ind.name.toUpperCase()}]:\n${answers[ind.id]}\n\n`;
+    });
 
     if (isBypassAI) {
       diagnosis = `[EVALUASI MANUAL] Mesin AI dinonaktifkan oleh pengguna. Menunggu tinjauan langsung dan validasi dari Guru.`;
     } else {
       const activeKeyToUse = localStorage.getItem('PENA_AI_KEY') || defaultSysKey;
       if (!activeKeyToUse) {
-        alert('API Key tidak ditemukan. Silakan atur kembali di Pengaturan API Key.');
+        alert('API Key tidak ditemukan. Silakan atur kembali di Pengaturan AI.');
         setActiveTab('introSiswa'); setIsSubmittingTask(false); return;
       }
       try {
         const prompt = `Bertindaklah sebagai "Pendidik Kritis yang Membangun". Tugas Anda mengevaluasi karya analitis siswa secara komprehensif, obyektif, dan suportif.
-HINDARI KATA MERENDAHKAN (seperti dangkal, gagal total, asal-asalan). Apresiasi logika yang benar, berikan masukan konstruktif jika ada celah nalar.
+HINDARI KATA MERENDAHKAN (seperti dangkal, gagal, asal-asalan). Apresiasi logika yang benar, berikan masukan jika ada celah nalar.
 
-Kutipan Masalah Utama: "${formData.naskahText}"
+Kutipan Masalah Utama Siswa: "${naskahText}"
 
-Analisis Aspek Ennis Siswa: "${formData.ennisText}"
-Analisis Aspek Polya Siswa: "${formData.polyaText}"
+Uraian Analisis Siswa Berdasarkan Indikator yang Ditetapkan:
+${combinedDeconstruction}
 
 Instruksi Evaluasi:
-1. Bedah korelasi argumen siswa dengan kutipan naskah awal. Jangan merangkum, tapi evaluasi kedalamannya.
-2. Nilai pemahaman masalah, asumsi tersembunyi, dan eksekusi solusinya.
-3. Berikan diagnosis evaluatif (maksimal 2 paragraf padat). Jelaskan spesifik apa yang sudah logis dan apa yang masih perlu diperbaiki.`;
+1. Bedah korelasi argumen siswa pada setiap indikator dengan kutipan naskah awal. Jangan sekadar merangkum.
+2. Nilai pemahaman masalah, validasi argumen, dan logika rasional yang disusun oleh siswa.
+3. Berikan diagnosis evaluatif (maksimal 3 paragraf padat). Jelaskan spesifik apa yang sudah logis dan apa yang masih perlu diperbaiki.`;
         
         const aiResponse = await callGeminiAPI(prompt, activeKeyToUse, 3);
         diagnosis = `[HASIL EVALUASI AI] ${aiResponse}`;
@@ -344,15 +420,13 @@ Instruksi Evaluasi:
         diagnosis = `[ERROR KONEKSI AI] Gagal menghubungi mesin analitis. Detail: ${err.message}.`;
       }
     }
-
-    const combinedDeconstruction = `[ENNIS]: ${formData.ennisText}\n\n[POLYA]: ${formData.polyaText}`;
     
     const submissionData = {
       classCode: currentClass?.classCode || 'MANDIRI',
       studentName: currentStudent.name,
       mode: userRole === 'mandiri' ? 'Mandiri (Privat)' : 'Tugas Kelas',
-      naskahText: formData.naskahText, 
-      deconstructionText: combinedDeconstruction,
+      naskahText: naskahText, 
+      deconstructionText: combinedDeconstruction.trim(),
       diagnosis, hasCopyPasted: isPasted, tabSwitches: tabSwitchCount,
       timestamp: new Date().toLocaleString(),
       timestampMs: Date.now(),
@@ -370,9 +444,6 @@ Instruksi Evaluasi:
     setActiveTab('portfolio');
   };
 
-  const [selectedSubmission, setSelectedSubmission] = useState(null);
-  const [teacherNoteInput, setTeacherNoteInput] = useState('');
-
   const handleTeacherAction = async (id, status) => {
     await updateDoc(doc(db, 'submissions', id), { status, teacherFeedback: teacherNoteInput });
     setSelectedSubmission(null); setTeacherNoteInput('');
@@ -381,6 +452,7 @@ Instruksi Evaluasi:
   const handleDeleteSubmission = async (id) => {
     if(window.confirm('Yakin ingin menghapus hasil evaluasi siswa ini? Siswa harus mengulang tugasnya dari awal.')){
       await deleteDoc(doc(db, 'submissions', id));
+      setSelectedSubmission(null);
     }
   };
 
@@ -432,6 +504,19 @@ Instruksi Evaluasi:
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
         body { margin: 0; background-color: #f8fafc; font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+        
+        /* 📱 RESPONSIVE MEDIA QUERIES UNTUK HP */
+        @media screen and (max-width: 600px) {
+           .responsive-hero { padding: 8% 5% !important; }
+           .responsive-title { fontSize: 26px !important; }
+           .responsive-subtitle { fontSize: 14.5px !important; }
+           .responsive-card { padding: 25px 20px !important; }
+           .responsive-grid { flexDirection: column !important; }
+           .responsive-nav { flexDirection: column !important; alignItems: stretch !important; }
+           .responsive-nav button { width: 100% !important; margin-bottom: 5px; }
+           .responsive-table th, .responsive-table td { padding: 12px 10px !important; fontSize: 13px !important; }
+        }
+
         @media print { 
           body * { visibility: hidden; } 
           .print-area, .print-area * { visibility: visible; } 
@@ -446,16 +531,16 @@ Instruksi Evaluasi:
       </header>
 
       {!userRole && activeTab === 'landing' && (
-        <div style={styles.heroCard} className="no-print">
+        <div style={styles.heroCard} className="no-print responsive-hero">
           <div style={{textAlign: 'center', marginBottom: '40px'}}>
-            <span style={styles.badgeLabel}>Bagian dari Ekosistem PENA 1</span>
-            <h1 style={styles.titleHero}>Platform Pertanggungjawaban Nalar</h1>
-            <p style={styles.subtitleHero}>
-              Bermula dari alat uji orisinalitas di <b>Platform 5 (Buletin Karya Murid)</b>, <b>PENA Pilar 2</b> kini berevolusi menjadi instrumen validasi nalar (<i>Platform Elaborasi Nalar Aksara</i>). Sistem ini dapat digunakan secara terintegrasi di ruang kelas maupun secara mandiri tanpa pengawasan Instruktur/Guru.
+            <span style={styles.badgeLabel}>Platform Elaborasi Nalar Aksara (PENA 1)</span>
+            <h1 style={{...styles.titleHero}} className="responsive-title">Platform Pertanggungjawaban Nalar</h1>
+            <p style={{...styles.subtitleHero}} className="responsive-subtitle">
+              Bermula sebagai alat uji orisinalitas di <b>Platform 5 (Buletin - Karya Murid)</b>, <b>PENA Pilar 2</b> kini berevolusi secara fundamental menjadi instrumen validasi nalar mandiri. Sistem ini siap membedah pemikiran siswa dan terintegrasi baik dalam ruang kelas maupun simulasi personal tanpa pengawasan Instruktur.
             </p>
           </div>
           
-          <div style={styles.gridMenu}>
+          <div style={{...styles.gridMenu}} className="responsive-grid">
             <div style={styles.menuBox} onClick={() => setActiveTab('loginSiswa')}>
               <div style={styles.iconCircle}>🎓</div>
               <h3 style={styles.menuTitle}>Ruang Siswa</h3>
@@ -468,8 +553,8 @@ Instruksi Evaluasi:
             </div>
             <div style={styles.menuBox} onClick={() => setShowAdminGate(true)}>
               <div style={styles.iconCircle}>👨‍🏫</div>
-              <h3 style={styles.menuTitle}>Instruktur / Admin</h3>
-              <p style={styles.menuDesc}>Gerbang khusus Pendidik untuk mengelola evaluasi dan kelas.</p>
+              <h3 style={styles.menuTitle}>Gerbang Instruktur</h3>
+              <p style={styles.menuDesc}>Manajemen kelas, pengaturan indikator analitik, dan validasi evaluasi siswa.</p>
             </div>
           </div>
         </div>
@@ -477,7 +562,7 @@ Instruksi Evaluasi:
 
       {showAdminGate && (
         <div style={styles.modalOverlay} className="no-print">
-          <div style={styles.modalCard}>
+          <div style={styles.modalCard} className="responsive-card">
             <div style={{textAlign: 'center', marginBottom: '20px'}}>
               <h3 style={styles.modalTitle}>Gerbang Terbatas Instruktur</h3>
               <p style={styles.modalDesc}>Sistem manajemen evaluasi siswa memerlukan otorisasi. Silakan masukkan Sandi Master.</p>
@@ -498,7 +583,7 @@ Instruksi Evaluasi:
       )}
 
       {!userRole && activeTab === 'loginSiswa' && (
-        <div style={styles.card} className="no-print">
+        <div style={styles.card} className="no-print responsive-card">
           <button style={styles.backBtn} onClick={() => setActiveTab('landing')}>← Kembali ke Beranda</button>
           <h2 style={{color: '#0f172a'}}>Akses Ruang Kelas</h2>
           {!currentClass ? (
@@ -525,7 +610,7 @@ Instruksi Evaluasi:
 
       {showPinModal && (
         <div style={styles.modalOverlay} className="no-print">
-          <div style={styles.modalCard}>
+          <div style={styles.modalCard} className="responsive-card">
             <h3 style={styles.modalTitle}>Otorisasi Instruktur</h3>
             <p style={styles.modalDesc}>Buat kelas baru atau masuk ke kelas yang sudah ada menggunakan identitas Anda.</p>
             <form onSubmit={handleRegisterOrLoginGuru} autoComplete="off">
@@ -549,7 +634,7 @@ Instruksi Evaluasi:
 
       {showMandiriModal && (
         <div style={styles.modalOverlay} className="no-print">
-          <div style={styles.modalCard}>
+          <div style={styles.modalCard} className="responsive-card">
             <h3 style={styles.modalTitle}>Simulasi Mode Mandiri</h3>
             <p style={styles.modalDesc}>Uji orisinalitas dan dekonstruksi nalar Anda secara pribadi tanpa campur tangan Instruktur.</p>
             <form onSubmit={handleMandiriLogin}>
@@ -565,7 +650,7 @@ Instruksi Evaluasi:
       )}
 
       {userRole && (
-        <nav style={styles.navBar} className="no-print">
+        <nav style={{...styles.navBar}} className="no-print responsive-nav">
           {(userRole === 'siswa' || userRole === 'mandiri') && (
             <>
               <span style={styles.navBadge}>{userRole === 'mandiri' ? 'Mode Privat' : currentClass?.subject}</span>
@@ -592,6 +677,7 @@ Instruksi Evaluasi:
               <span style={styles.navBadge}>{currentClass?.subject} (Kode: {currentClass?.classCode})</span>
               <button style={activeTab === 'guruDashboard' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruDashboard')}>Dasbor Evaluasi</button>
               <button style={activeTab === 'guruSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruSiswa')}>Manajemen Peserta</button>
+              <button style={activeTab === 'guruIndikator' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruIndikator')}>Manajemen Indikator</button>
             </>
           )}
         </nav>
@@ -601,8 +687,8 @@ Instruksi Evaluasi:
         {(userRole === 'siswa' || userRole === 'mandiri') && currentStudent && (
           <>
             {activeTab === 'introSiswa' && (
-              <div style={styles.card} className="no-print">
-                <h2 style={{color: '#0f172a'}}>Konfigurasi Sistem Evaluasi</h2>
+              <div style={styles.card} className="no-print responsive-card">
+                <h2 style={{color: '#0f172a', marginTop: 0}}>Konfigurasi Sistem Evaluasi</h2>
                 <div style={{...styles.introBox, background: isApiValid ? '#f0fdf4' : '#fefce8', borderColor: isApiValid ? '#bbf7d0' : '#fef08a'}}>
                   <p style={{margin: '0 0 8px 0', color: isApiValid ? '#166534' : '#854d0e', fontSize: '15px'}}>
                     <b>Status Sistem: {isApiValid ? '✅ Tersambung & Siap Digunakan' : '⚠️ Menunggu Integrasi Kunci AI'}</b>
@@ -632,7 +718,7 @@ Instruksi Evaluasi:
                   {userRole === 'siswa' && (
                     <div style={{border: '1px solid #fecaca', background: '#fef2f2', padding: '25px', borderRadius: '12px'}}>
                       <h3 style={{marginTop: 0, color: '#991b1b'}}>Opsi Cadangan: Evaluasi Manual Guru</h3>
-                      <p style={{fontSize: '14px', color: '#991b1b', lineHeight: '1.6'}}>Jika kamu terkendala dalam mengaktifkan mesin AI, kamu dapat memotong (*bypass*) sistem AI. Jawabanmu akan langsung diteruskan dan dievaluasi secara manual oleh Guru/Instruktur.</p>
+                      <p style={{fontSize: '14px', color: '#991b1b', lineHeight: '1.6'}}>Jika kamu terkendala dalam mengaktifkan mesin AI, kamu dapat memotong (*bypass*) sistem AI. Jawabanmu akan langsung diteruskan dan dievaluasi secara manual oleh Instruktur.</p>
                       <button onClick={handleBypassAI} style={{...styles.btnPrimary, marginTop: '10px', background: '#dc2626'}}>Lanjutkan Tanpa Mesin AI (Manual)</button>
                     </div>
                   )}
@@ -641,7 +727,7 @@ Instruksi Evaluasi:
             )}
 
             {activeTab === 'workspace' && (
-              <div style={styles.card} className="no-print">
+              <div style={styles.card} className="no-print responsive-card">
                 {isWorkspaceLocked ? (
                   <div style={{textAlign: 'center', padding: '50px 20px'}}>
                     <h3 style={{fontSize: '26px', color: '#0f172a', marginBottom: '10px'}}>Karya Telah Disegel 🔒</h3>
@@ -665,8 +751,8 @@ Instruksi Evaluasi:
                     {!isKutipanLocked ? (
                        <div style={{border: '1px solid #e2e8f0', padding: '25px', borderRadius: '12px', background: '#f8fafc', boxShadow: '0 2px 4px rgba(0,0,0,0.01)'}}>
                           <label style={{fontWeight: '800', color: '#0f172a', fontSize: '16px'}}>Tahap 1: Masukkan Kutipan Masalah Utama</label>
-                          <p style={{fontSize: '14px', color: '#64748b', marginTop: '8px', marginBottom: '20px', lineHeight: '1.6'}}>Pada tahap awal ini, kamu masih dibebaskan mencari dan menempel (*copy-paste*) premis rujukan. Setelah kutipan dikunci, **Sistem Integritas Anti-Kecurangan** akan langsung aktif mengawasi aktivitas layar.</p>
-                          <textarea rows="4" placeholder="Tempelkan premis atau kutipan asli dari sumber yang ingin dianalisis di sini..." value={formData.naskahText} onChange={(e) => setFormData({...formData, naskahText: e.target.value})} style={{...styles.textarea, marginBottom: '20px'}} required />
+                          <p style={{fontSize: '14px', color: '#64748b', marginTop: '8px', marginBottom: '20px', lineHeight: '1.6'}}>Pada tahap awal ini, kamu masih dibebaskan mencari dan menempel (*copy-paste*) premis rujukan. Setelah kutipan dikunci, **Sistem Integritas Anti-Kecurangan** akan langsung aktif mengawasi layar.</p>
+                          <textarea rows="4" placeholder="Tempelkan premis atau kutipan asli dari sumber yang ingin dianalisis di sini..." value={naskahText} onChange={(e) => setNaskahText(e.target.value)} style={{...styles.textarea, marginBottom: '20px'}} required />
                           <button type="button" style={styles.btnPrimary} onClick={handleLockKutipan}>
                              Kunci Kutipan & Lanjut Tahap Analisis
                           </button>
@@ -680,27 +766,33 @@ Instruksi Evaluasi:
 
                           <div style={{background: '#f1f5f9', padding: '20px', borderRadius: '8px', marginBottom: '30px', border: '1px solid #e2e8f0'}}>
                              <p style={{margin: '0 0 8px 0', fontSize: '14px', color: '#475569', fontWeight: '700'}}>Kutipan Tersimpan:</p>
-                             <p style={{margin: 0, fontStyle: 'italic', color: '#334155', lineHeight: '1.6'}}>{formData.naskahText}</p>
+                             <p style={{margin: 0, fontStyle: 'italic', color: '#334155', lineHeight: '1.6'}}>{naskahText}</p>
                              <button type="button" onClick={() => setIsKutipanLocked(false)} style={{...styles.textBtn, padding: '10px 0 0 0', fontSize: '13px', marginTop: '10px', color: '#2563eb'}}>Buka Kunci & Edit Kutipan</button>
                           </div>
 
-                          <div style={styles.promptBox}>
-                            <p style={{margin: '0 0 8px 0', fontWeight: '800', color: '#0f172a', fontSize: '15px'}}>🧠 Aspek Dekonstruksi ENNIS (5 Indikator)</p>
-                            <p style={{margin: 0, fontSize: '13.5px', color: '#475569', lineHeight: '1.6'}}>
-                              <b>Pemantik:</b> Uraikan penjelasan sederhana, evaluasi kredibilitas, deduksi/induksi, identifikasi asumsi tersembunyi, dan taktik strategi logis terhadap topik <b>{getDynamicPrompt(formData.naskahText)}</b> secara terperinci.
-                            </p>
-                          </div>
-                          <textarea rows="6" placeholder="Susun urain aspek Ennis Anda secara orisinal di sini..." value={formData.ennisText} onChange={(e) => setFormData({...formData, ennisText: e.target.value})} onPaste={() => setIsPasted(true)} style={{...styles.textarea, marginBottom: '25px'}} required />
+                          <h3 style={{borderBottom: '2px solid #e2e8f0', paddingBottom: '10px', marginBottom: '20px', color: '#0f172a'}}>Tahap 2: Dekonstruksi Berdasarkan Indikator</h3>
+                          
+                          {activeIndicatorsList.map((ind, index) => (
+                             <div key={ind.id} style={{marginBottom: '30px'}}>
+                               <div style={styles.promptBox}>
+                                  <p style={{margin: '0 0 8px 0', fontWeight: '800', color: '#0f172a', fontSize: '15px'}}>KOTAK {index + 1}: {ind.name}</p>
+                                  <p style={{margin: 0, fontSize: '13.5px', color: '#475569', lineHeight: '1.6'}}>
+                                    <b>Pemantik:</b> {ind.prompt}
+                                  </p>
+                               </div>
+                               <textarea 
+                                 rows="4" 
+                                 placeholder={`Ketik analisis untuk ${ind.name} di sini...`} 
+                                 value={answers[ind.id] || ''} 
+                                 onChange={(e) => handleAnswerChange(ind.id, e.target.value)} 
+                                 onPaste={() => setIsPasted(true)} 
+                                 style={{...styles.textarea, marginBottom: '10px'}} 
+                                 required 
+                               />
+                             </div>
+                          ))}
 
-                          <div style={{...styles.promptBox, borderLeftColor: '#3b82f6'}}>
-                            <p style={{margin: '0 0 8px 0', fontWeight: '800', color: '#1d4ed8', fontSize: '15px'}}>⚙️ Aspek Penyelesaian POLYA (4 Tahapan)</p>
-                            <p style={{margin: 0, fontSize: '13.5px', color: '#475569', lineHeight: '1.6'}}>
-                              <b>Pemantik:</b> Jabarkan pemahaman masalah fundamental, rencana pemecahan strategis, eksekusi penerapan data, dan evaluasi/sanggahan ulang yang relevan terhadap konteks <b>{getDynamicPrompt(formData.naskahText)}</b>.
-                            </p>
-                          </div>
-                          <textarea rows="6" placeholder="Susun kerangka penyelesaian Polya Anda secara orisinal di sini..." value={formData.polyaText} onChange={(e) => setFormData({...formData, polyaText: e.target.value})} onPaste={() => setIsPasted(true)} style={{...styles.textarea, marginBottom: '30px'}} required />
-
-                          <button type="submit" style={{...styles.btnPrimary, opacity: isSubmittingTask ? 0.7 : 1}} disabled={isSubmittingTask}>
+                          <button type="submit" style={{...styles.btnPrimary, opacity: isSubmittingTask ? 0.7 : 1, marginTop: '10px'}} disabled={isSubmittingTask}>
                             {isSubmittingTask ? 'Memproses Validasi Karya...' : isBypassAI ? 'Kirim Kanvas ke Meja Instruktur' : 'Kunci Nalar & Dapatkan Evaluasi AI Sistem'}
                           </button>
                        </form>
@@ -731,7 +823,7 @@ Instruksi Evaluasi:
                     <p style={{fontSize: '14px', color: '#475569', marginBottom: '8px', fontWeight: '600'}}>Kutipan Permasalahan Fundamental:</p>
                     <p style={{background: '#fff', padding: '15px', borderRadius: '8px', fontStyle: 'italic', border: '1px solid #e2e8f0', color: '#334155', lineHeight: '1.6'}}>{activePortfolio.naskahText}</p>
                     
-                    <p style={{fontSize: '14px', color: '#475569', marginTop: '25px', marginBottom: '8px', fontWeight: '600'}}>Resolusi Kritis (Matriks Ennis & Polya):</p>
+                    <p style={{fontSize: '14px', color: '#475569', marginTop: '25px', marginBottom: '8px', fontWeight: '600'}}>Resolusi Kritis Berdasarkan Indikator:</p>
                     <div style={{background: '#fff', padding: '20px', borderRadius: '8px', whiteSpace: 'pre-wrap', border: '1px solid #e2e8f0', lineHeight: '1.7', color: '#1e293b', fontSize: '14.5px'}}>
                       {activePortfolio.deconstructionText}
                     </div>
@@ -760,7 +852,7 @@ Instruksi Evaluasi:
           <>
             {activeTab === 'guruDashboard' && (
               <div className={activeTab === 'guruDashboard' ? "print-area" : ""}>
-                <div style={styles.card}>
+                <div style={styles.card} className="responsive-card">
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '15px'}}>
                     <h2 style={{margin: 0, color: '#0f172a'}}>Dasbor Penilaian Karya</h2>
                     <div className="no-print" style={{display: 'flex', flexWrap: 'wrap', gap: '10px'}}>
@@ -771,7 +863,7 @@ Instruksi Evaluasi:
                   
                   {submissions.length === 0 ? <p style={{color: '#64748b', fontSize: '14.5px', background: '#f8fafc', padding: '25px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center'}}>Belum ada artefak nalar siswa yang masuk ke dalam sistem evaluasi.</p> : (
                     <div style={{overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px'}}>
-                      <table style={styles.table}>
+                      <table style={styles.table} className="responsive-table">
                         <thead style={{background: '#f8fafc'}}>
                           <tr>
                             <th style={{textAlign: 'left', padding: '15px', color: '#475569'}}>Identitas Peserta</th>
@@ -785,7 +877,7 @@ Instruksi Evaluasi:
                               <td style={{padding: '18px 15px'}}>
                                 <b style={{fontSize: '15px', color: '#0f172a'}}>{sub.studentName}</b><br/>
                                 <span style={{fontSize: '12.5px', color: '#64748b', marginTop: '5px', display: 'inline-block'}}>
-                                  Tingkat Pelanggaran: <span style={{color: sub.tabSwitches > 0 || sub.hasCopyPasted ? '#dc2626' : '#16a34a', fontWeight: '800'}}>{sub.tabSwitches} Tab | {sub.hasCopyPasted ? 'Indikasi Paste' : 'Bersih'}</span>
+                                  Pelanggaran: <span style={{color: sub.tabSwitches > 0 || sub.hasCopyPasted ? '#dc2626' : '#16a34a', fontWeight: '800'}}>{sub.tabSwitches} Tab | {sub.hasCopyPasted ? 'Indikasi Paste' : 'Bersih'}</span>
                                 </span>
                               </td>
                               <td style={{padding: '18px 15px', fontWeight: '700', fontSize: '14px', color: sub.status.includes('Ditolak') ? '#dc2626' : '#334155'}}>{sub.status}</td>
@@ -806,8 +898,8 @@ Instruksi Evaluasi:
             )}
 
             {activeTab === 'guruSiswa' && (
-              <div style={styles.card} className="no-print">
-                <h2 style={{color: '#0f172a'}}>Otoritas Peserta Uji</h2>
+              <div style={styles.card} className="no-print responsive-card">
+                <h2 style={{color: '#0f172a', marginTop: 0}}>Otoritas Peserta Uji</h2>
                 <div style={{background: '#f8fafc', padding: '20px', borderRadius: '12px', fontSize: '14.5px', marginBottom: '30px', border: '1px solid #e2e8f0', boxShadow: '0 2px 4px rgba(0,0,0,0.01)'}}>
                   🔑 <b>KODE AKSES RESMI KELAS: <span style={{fontSize: '24px', color: '#b91c1c', letterSpacing: '3px', marginLeft: '10px'}}>{currentClass?.classCode}</span></b><br/><br/>
                   <span style={{color: '#475569', lineHeight: '1.6'}}>Berikan kode di atas kepada peserta. Daftarkan nama asli peserta di bawah ini untuk menghasilkan **PIN Unik Otentikasi** milik mereka.</span>
@@ -829,9 +921,39 @@ Instruksi Evaluasi:
               </div>
             )}
 
+            {activeTab === 'guruIndikator' && (
+               <div style={styles.card} className="no-print responsive-card">
+                  <h2 style={{color: '#0f172a', marginTop: 0}}>Manajemen Indikator Analitik</h2>
+                  <p style={{fontSize: '14.5px', color: '#475569', marginBottom: '25px', lineHeight: '1.6'}}>Indikator ini akan menjadi acuan isian kotak tugas bagi siswa dan menjadi patokan mutlak evaluasi bagi Mesin AI. (Maksimal 10 Indikator)</p>
+                  
+                  <div style={{background: '#f1f5f9', padding: '20px', borderRadius: '12px', marginBottom: '30px'}}>
+                     <h3 style={{marginTop: 0, fontSize: '16px'}}>Tambah Indikator Baru</h3>
+                     <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                        <input type="text" placeholder="Nama Indikator (Contoh: Analisis SWOT)" value={newIndName} onChange={(e) => setNewIndName(e.target.value)} style={styles.input} />
+                        <textarea rows="2" placeholder="Pemantik/Instruksi Siswa (Contoh: Jabarkan kekuatan dan kelemahan...)" value={newIndPrompt} onChange={(e) => setNewIndPrompt(e.target.value)} style={styles.textarea} />
+                        <button type="button" onClick={handleAddIndicator} style={{...styles.btnSecondary, background: '#e2e8f0', color: '#0f172a', border: 'none'}}>+ Tambahkan ke Daftar</button>
+                     </div>
+                  </div>
+
+                  <ul style={{paddingLeft: 0, listStyle: 'none', margin: 0, marginBottom: '30px'}}>
+                     {localIndicators.map((ind, index) => (
+                        <li key={ind.id} style={{background: '#fff', border: '1px solid #e2e8f0', padding: '20px', borderRadius: '8px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '15px'}}>
+                           <div style={{flex: '1 1 200px'}}>
+                              <p style={{margin: '0 0 5px 0', fontWeight: '800', color: '#0f172a'}}>KOTAK {index + 1}: {ind.name}</p>
+                              <p style={{margin: 0, fontSize: '13.5px', color: '#64748b', lineHeight: '1.5'}}>{ind.prompt}</p>
+                           </div>
+                           <button style={{background: '#fee2e2', border: 'none', color: '#b91c1c', cursor: 'pointer', fontWeight: '800', padding: '8px 12px', borderRadius: '6px', fontSize: '12px'}} onClick={() => handleRemoveIndicator(ind.id)}>Hapus</button>
+                        </li>
+                     ))}
+                  </ul>
+
+                  <button type="button" onClick={handleSaveIndicatorsToDB} style={{...styles.btnPrimary, background: '#2563eb'}}>Simpan Seluruh Indikator ke Kelas</button>
+               </div>
+            )}
+
             {selectedSubmission && (
               <div style={styles.modalOverlay} className="no-print">
-                <div style={styles.modalCardLarge}>
+                <div style={styles.modalCardLarge} className="responsive-card">
                   <h3 style={{marginTop: 0, color: '#0f172a', fontSize: '22px', borderBottom: '2px solid #f1f5f9', paddingBottom: '15px'}}>Tinjauan Orisinalitas & Nalar</h3>
                   
                   {(selectedSubmission.tabSwitches > 0 || selectedSubmission.hasCopyPasted) && (
@@ -849,7 +971,7 @@ Instruksi Evaluasi:
                     <p style={{color: '#475569', margin: '0 0 8px 0', fontWeight: '700'}}>Kutipan Permasalahan (Premis):</p>
                     <p style={{background: '#fff', padding: '15px', borderRadius: '8px', fontStyle: 'italic', border: '1px solid #e2e8f0', margin: '0 0 25px 0', overflowWrap: 'break-word', color: '#334155'}}>{selectedSubmission.naskahText}</p>
                     
-                    <p style={{color: '#475569', margin: '0 0 8px 0', fontWeight: '700'}}>Argumen Dekonstruksi Terpadu:</p>
+                    <p style={{color: '#475569', margin: '0 0 8px 0', fontWeight: '700'}}>Argumen Dekonstruksi Siswa:</p>
                     <div style={{whiteSpace: 'pre-wrap', color: '#1e293b', background: '#fff', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', lineHeight: '1.7', overflowWrap: 'break-word'}}>{selectedSubmission.deconstructionText}</div>
                     
                     <div style={{background: selectedSubmission.diagnosis.includes('MANUAL') ? '#fefce8' : '#f0fdf4', padding: '20px', borderLeft: `5px solid ${selectedSubmission.diagnosis.includes('MANUAL') ? '#eab308' : '#16a34a'}`, marginTop: '25px', borderRadius: '0 8px 8px 0'}}>
@@ -877,30 +999,30 @@ Instruksi Evaluasi:
 }
 
 const styles = {
-  appContainer: { maxWidth: '900px', width: '100%', boxSizing: 'border-box', margin: '30px auto', padding: '20px', color: '#0f172a' },
+  appContainer: { maxWidth: '950px', width: '100%', boxSizing: 'border-box', margin: '30px auto', padding: '20px', color: '#0f172a' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e2e8f0', paddingBottom: '20px', marginBottom: '30px', flexWrap: 'wrap', gap: '10px' },
   logoText: { margin: 0, fontSize: '24px', fontWeight: '900', letterSpacing: '0.5px', color: '#0f172a' },
   
-  heroCard: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '6%', boxSizing: 'border-box', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.05), 0 10px 10px -5px rgba(0,0,0,0.02)' },
+  heroCard: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '5%', boxSizing: 'border-box', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.05)' },
   badgeLabel: { background: '#eff6ff', color: '#1d4ed8', padding: '8px 16px', borderRadius: '20px', fontSize: '13px', fontWeight: '800', display: 'inline-block', marginBottom: '15px' },
-  titleHero: { fontSize: '32px', fontWeight: '900', marginBottom: '15px', color: '#0f172a', lineHeight: '1.2' },
-  subtitleHero: { fontSize: '16px', color: '#475569', lineHeight: '1.7', maxWidth: '750px', margin: '0 auto' },
+  titleHero: { fontSize: '30px', fontWeight: '900', marginBottom: '15px', color: '#0f172a', lineHeight: '1.2' },
+  subtitleHero: { fontSize: '15px', color: '#475569', lineHeight: '1.7', maxWidth: '750px', margin: '0 auto' },
   
   card: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '5%', boxSizing: 'border-box', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.03)' },
   introBox: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '20px', marginBottom: '30px', fontSize: '14.5px', overflowWrap: 'break-word', color: '#334155' },
   
   gridMenu: { display: 'flex', gap: '20px', flexWrap: 'wrap' },
-  menuBox: { flex: '1 1 230px', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '30px 25px', cursor: 'pointer', textAlign: 'center', background: '#fff', transition: 'transform 0.2s, box-shadow 0.2s', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', boxSizing: 'border-box' },
+  menuBox: { flex: '1 1 230px', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '30px 25px', cursor: 'pointer', textAlign: 'center', background: '#fff', transition: 'all 0.2s', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', boxSizing: 'border-box' },
   iconCircle: { fontSize: '40px', marginBottom: '15px' },
   menuTitle: { fontSize: '18px', fontWeight: '800', color: '#0f172a', margin: '0 0 10px 0' },
   menuDesc: { fontSize: '14px', color: '#64748b', margin: 0, lineHeight: '1.6' },
   
   form: { display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px' },
   label: { fontSize: '14.5px', fontWeight: '700', color: '#334155', marginBottom: '-5px' },
-  input: { width: '100%', padding: '16px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box', outline: 'none', transition: 'border 0.2s', background: '#f8fafc' },
+  input: { width: '100%', padding: '16px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box', outline: 'none', background: '#f8fafc' },
   textarea: { width: '100%', padding: '16px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box', resize: 'vertical', outline: 'none', lineHeight: '1.6', background: '#f8fafc' },
   
-  btnPrimary: { background: '#0f172a', color: '#fff', border: 'none', padding: '16px', borderRadius: '10px', fontWeight: '800', cursor: 'pointer', width: '100%', fontSize: '15px', transition: 'all 0.2s', boxSizing: 'border-box' },
+  btnPrimary: { background: '#0f172a', color: '#fff', border: 'none', padding: '16px', borderRadius: '10px', fontWeight: '800', cursor: 'pointer', width: '100%', fontSize: '15px', boxSizing: 'border-box' },
   btnSecondary: { background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', padding: '14px 20px', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '14.5px' },
   btnDanger: { background: '#dc2626', color: '#fff', border: 'none', padding: '16px', borderRadius: '10px', cursor: 'pointer', fontWeight: '800', fontSize: '15px', boxSizing: 'border-box' },
   btnTable: { background: '#0f172a', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13.5px', fontWeight: '700', whiteSpace: 'nowrap' },
@@ -909,12 +1031,12 @@ const styles = {
   
   navBar: { display: 'flex', gap: '12px', marginBottom: '30px', alignItems: 'center', flexWrap: 'wrap' },
   navBadge: { background: '#e2e8f0', padding: '12px 18px', borderRadius: '10px', fontSize: '13.5px', fontWeight: '800', color: '#0f172a', display: 'inline-block' },
-  navBtn: { background: '#fff', border: '1px solid #cbd5e1', padding: '12px 20px', borderRadius: '10px', fontSize: '14px', cursor: 'pointer', color: '#334155', fontWeight: '700', flex: '1 1 auto', textAlign: 'center', boxSizing: 'border-box', transition: 'all 0.2s' },
+  navBtn: { background: '#fff', border: '1px solid #cbd5e1', padding: '12px 20px', borderRadius: '10px', fontSize: '14px', cursor: 'pointer', color: '#334155', fontWeight: '700', flex: '1 1 auto', textAlign: 'center', boxSizing: 'border-box' },
   navActive: { background: '#0f172a', color: '#fff', border: '1px solid #0f172a', padding: '12px 20px', borderRadius: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '800', flex: '1 1 auto', textAlign: 'center', boxSizing: 'border-box' },
   
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 999, padding: '20px', boxSizing: 'border-box', backdropFilter: 'blur(4px)' },
-  modalCard: { background: '#fff', padding: '40px 30px', borderRadius: '16px', width: '100%', maxWidth: '420px', boxSizing: 'border-box', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.3)' },
-  modalCardLarge: { background: '#fff', padding: '40px 30px', borderRadius: '16px', width: '100%', maxWidth: '700px', maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.3)' },
+  modalCard: { background: '#fff', padding: '40px 30px', borderRadius: '16px', width: '100%', maxWidth: '420px', boxSizing: 'border-box', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.3)', maxHeight: '90vh', overflowY: 'auto' },
+  modalCardLarge: { background: '#fff', padding: '40px 30px', borderRadius: '16px', width: '100%', maxWidth: '750px', maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.3)' },
   modalTitle: { margin: '0 0 10px 0', fontSize: '22px', color: '#0f172a', fontWeight: '900', textAlign: 'center' },
   modalDesc: { margin: '0 0 25px 0', fontSize: '14px', color: '#64748b', textAlign: 'center', lineHeight: '1.6' },
   modalActions: { display: 'flex', gap: '15px', marginTop: '30px', alignItems: 'center', flexWrap: 'wrap' },
@@ -923,7 +1045,7 @@ const styles = {
   contactLink: { color: '#2563eb', fontWeight: '800', textDecoration: 'none', fontSize: '15px' },
   
   monitor: { background: '#f8fafc', border: '1px solid #e2e8f0', padding: '18px', fontSize: '14px', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '30px', borderRadius: '10px' },
-  promptBox: { background: '#f8fafc', borderLeft: '5px solid #0f172a', padding: '22px', margin: '25px 0', borderRadius: '0 10px 10px 0' },
+  promptBox: { background: '#f8fafc', borderLeft: '5px solid #0f172a', padding: '22px', margin: '20px 0', borderRadius: '0 10px 10px 0' },
   certBox: { border: '1px solid #e2e8f0', padding: '6%', background: '#fff', borderRadius: '16px', boxSizing: 'border-box', overflowWrap: 'break-word', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.02)' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '550px' },
   main: { marginTop: '30px' }
