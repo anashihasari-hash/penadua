@@ -232,14 +232,13 @@ export default function App() {
   const isWorkspaceAllowed = isApiValid || isBypassAI; 
 
   // ==========================================
-  // API LOGIC 1: CEK PING (AUTO-RETRY SYSTEM)
+  // API LOGIC 1: CEK PING (JALUR V1 STABIL)
   // ==========================================
   const checkApiValidity = async (e) => {
     e.preventDefault();
     const cleanKey = apiKey.trim();
     if (cleanKey.length < 5) { alert('❌ API Key tidak valid.'); return; }
 
-    // UI FIXED: Matikan ijo, nyalakan loading state
     setIsValidatingApi(true);
     setIsApiValid(false);
 
@@ -248,8 +247,8 @@ export default function App() {
 
     while (retries > 0 && !success) {
       try {
-        // HANYA MENGGUNAKAN 1.5-FLASH
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cleanKey}`, {
+        // PERUBAHAN: Menggunakan jalur stabil v1, bukan v1beta
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${cleanKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts: [{ text: "Balas dengan kata: KONEKSI OK" }] }] })
@@ -258,7 +257,6 @@ export default function App() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error?.message || "Koneksi ditolak Google API.");
 
-        // JIKA SUKSES
         localStorage.setItem('PENA_AI_KEY', cleanKey);
         setIsApiValid(true);
         setIsBypassAI(false);
@@ -274,13 +272,12 @@ export default function App() {
           retries--;
           if (retries > 0) {
             console.log(`Server sibuk. Gedor ulang... sisa ${retries} percobaan.`);
-            await new Promise(r => setTimeout(r, 2000)); // Diam 2 detik, lalu nyoba lagi
+            await new Promise(r => setTimeout(r, 2000));
           } else {
             setIsApiValid(false);
-            setTimeout(() => { alert(`❌ SERVER GOOGLE SEDANG PENUH!\nAntrean gratisan macet. Silakan tunggu 30 detik lalu klik Uji Ping lagi.`); }, 100);
+            setTimeout(() => { alert(`❌ SERVER GOOGLE SEDANG PENUH!\nAntrean gratisan macet. Silakan tunggu beberapa saat lalu klik Uji Ping lagi.`); }, 100);
           }
         } else {
-          // Error lain (kunci salah, dll)
           retries = 0;
           setIsApiValid(false);
           setTimeout(() => { alert(`❌ UJI PING GAGAL!\nDetail: ${err.message}`); }, 100);
@@ -297,7 +294,7 @@ export default function App() {
   };
 
   // ==========================================
-  // API LOGIC 2: SUBMIT KANVAS (AUTO-RETRY SYSTEM)
+  // API LOGIC 2: SUBMIT KANVAS (JALUR V1 STABIL)
   // ==========================================
   const handleSubmitCanvas = async (e) => {
     e.preventDefault();
@@ -323,8 +320,8 @@ export default function App() {
         try {
           const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
           
-          // HANYA MENGGUNAKAN 1.5-FLASH
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKeyToUse}`, {
+          // PERUBAHAN: Menggunakan jalur stabil v1, bukan v1beta
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${activeKeyToUse}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
           });
@@ -343,7 +340,7 @@ export default function App() {
             retries--;
             if (retries > 0) {
               console.log(`Server sibuk saat analisis. Gedor ulang... sisa ${retries} percobaan.`);
-              await new Promise(r => setTimeout(r, 2500)); // Diam 2.5 detik lalu hajar lagi
+              await new Promise(r => setTimeout(r, 2500));
             } else {
               diagnosis = `[ERROR SERVER SIBUK] Mesin AI Google menolak respon (High Demand). Silakan hapus karya ini dan kirim ulang tugasnya beberapa saat lagi.`;
             }
