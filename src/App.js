@@ -33,7 +33,8 @@ const session = {
     } catch (e) { return fallback; }
   },
   clear: () => {
-    ['PENA_ROLE', 'PENA_TAB', 'PENA_CLASS', 'PENA_STUDENT'].forEach(k => localStorage.removeItem(k));
+    // PERBAIKAN: Menambahkan kunci bypass dan validasi agar ikut bersih saat logout
+    ['PENA_ROLE', 'PENA_TAB', 'PENA_CLASS', 'PENA_STUDENT', 'PENA_VALIDATED', 'PENA_BYPASSED'].forEach(k => localStorage.removeItem(k));
   }
 };
 
@@ -99,9 +100,11 @@ export default function App() {
 
   const defaultSysKey = process.env.REACT_APP_GEMINI_API_KEY || "";
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('PENA_AI_KEY') || defaultSysKey);
-  const [isApiValid, setIsApiValid] = useState(() => (localStorage.getItem('PENA_AI_KEY') || defaultSysKey).length > 5);
-
-  const [isBypassAI, setIsBypassAI] = useState(false);
+  
+  // PERBAIKAN: isApiValid dan isBypassAI sekarang mengambil dari sesi sementara (session), bukan localStorage permanen
+  const [isApiValid, setIsApiValid] = useState(() => session.get('PENA_VALIDATED', false));
+  const [isBypassAI, setIsBypassAI] = useState(() => session.get('PENA_BYPASSED', false));
+  
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
   const [isValidatingApi, setIsValidatingApi] = useState(false);
 
@@ -153,7 +156,7 @@ export default function App() {
     setSubmissions([]); setStudents([]); setActiveTab('landing'); resetCanvasState();
     setClassCodeInput(''); setLoginStudentName(''); setLoginStudentPin('');
     setTeacherNameInput(''); setSubjectInput(''); setPinInput(''); setMandiriNameInput('');
-    setIsApiValid(false);
+    setIsApiValid(false); setIsBypassAI(false);
   };
 
   // 🛡️ AUTO-HEALING SYSTEM
@@ -252,7 +255,12 @@ export default function App() {
     const student = students.find(s => s?.name?.trim().toLowerCase() === inputName && s?.pin === loginStudentPin.trim());
     
     if (student) {
-      setCurrentStudent(student); setUserRole('siswa'); setIsBypassAI(false);
+      setCurrentStudent(student); setUserRole('siswa'); 
+      
+      // PERBAIKAN: Reset status Kanvas setiap kali ada yang login baru
+      setIsBypassAI(false); setIsApiValid(false);
+      session.set('PENA_VALIDATED', false); session.set('PENA_BYPASSED', false);
+      
       resetCanvasState(); setActiveTab('introSiswa'); 
     } else { alert('❌ Nama atau PIN Siswa salah.'); }
   };
@@ -325,7 +333,12 @@ export default function App() {
     setCurrentClass(null);
     const newMandiriStudent = { id: 'mandiri-' + Date.now(), name };
     setCurrentStudent(newMandiriStudent);
-    setUserRole('mandiri'); setSubmissions([]); setIsBypassAI(false);
+    setUserRole('mandiri'); setSubmissions([]);
+    
+    // PERBAIKAN: Reset status Kanvas tiap kali login mode mandiri
+    setIsBypassAI(false); setIsApiValid(false);
+    session.set('PENA_VALIDATED', false); session.set('PENA_BYPASSED', false);
+
     resetCanvasState(); setShowMandiriModal(false); setActiveTab('introSiswa'); 
   };
 
@@ -351,6 +364,10 @@ export default function App() {
       await callGeminiAPI("Balas dengan kata: KONEKSI OK", cleanKey, 2);
       localStorage.setItem('PENA_AI_KEY', cleanKey);
       setIsApiValid(true); setIsBypassAI(false);
+      
+      // PERBAIKAN: Simpan ke session saat lolos tes API
+      session.set('PENA_VALIDATED', true); session.set('PENA_BYPASSED', false);
+      
       alert('✅ Kunci Tervalidasi Google! Segel Kanvas Terbuka.');
       setActiveTab('workspace');
     } catch (err) {
@@ -360,7 +377,11 @@ export default function App() {
   };
 
   const handleBypassAI = () => {
-    setIsBypassAI(true);
+    setIsBypassAI(true); setIsApiValid(false);
+    
+    // PERBAIKAN: Simpan ke session saat milih Bypass
+    session.set('PENA_BYPASSED', true); session.set('PENA_VALIDATED', false);
+    
     alert('⚠️ Mesin AI Dinonaktifkan. Tugas akan dievaluasi secara manual oleh instruktur/guru.');
     setActiveTab('workspace');
   };
@@ -505,12 +526,12 @@ Instruksi Evaluasi:
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
         body { margin: 0; background-color: #f8fafc; font-family: 'Inter', system-ui, -apple-system, sans-serif; }
         
-        /* 📱 RESPONSIVE MEDIA QUERIES UNTUK HP */
+        /* 📱 RESPONSIVE MEDIA QUERIES UNTUK HP (SUDAH DIPERBAIKI) */
         @media screen and (max-width: 600px) {
-           .responsive-hero { padding: 8% 5% !important; }
-           .responsive-title { fontSize: 26px !important; }
-           .responsive-subtitle { fontSize: 14.5px !important; }
-           .responsive-card { padding: 25px 20px !important; }
+           .responsive-hero { padding: 8% 5% !important; width: 100% !important; box-sizing: border-box !important; overflow: hidden !important; }
+           .responsive-title { fontSize: 24px !important; line-height: 1.3 !important; word-wrap: break-word !important; }
+           .responsive-subtitle { fontSize: 14px !important; width: 100% !important; box-sizing: border-box !important; word-wrap: break-word !important; }
+           .responsive-card { padding: 25px 20px !important; width: 100% !important; box-sizing: border-box !important; overflow: hidden !important; }
            .responsive-grid { flexDirection: column !important; }
            .responsive-nav { flexDirection: column !important; alignItems: stretch !important; }
            .responsive-nav button { width: 100% !important; margin-bottom: 5px; }
@@ -1006,7 +1027,9 @@ const styles = {
   heroCard: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '5%', boxSizing: 'border-box', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.05)' },
   badgeLabel: { background: '#eff6ff', color: '#1d4ed8', padding: '8px 16px', borderRadius: '20px', fontSize: '13px', fontWeight: '800', display: 'inline-block', marginBottom: '15px' },
   titleHero: { fontSize: '30px', fontWeight: '900', marginBottom: '15px', color: '#0f172a', lineHeight: '1.2' },
-  subtitleHero: { fontSize: '15px', color: '#475569', lineHeight: '1.7', maxWidth: '750px', margin: '0 auto' },
+  
+  // PERBAIKAN: Style subtitleHero dibuat lebih responsive dan dipaksa untuk word-wrap agar teks memanjang ke bawah kalau di HP
+  subtitleHero: { fontSize: '15px', color: '#475569', lineHeight: '1.7', width: '100%', maxWidth: '750px', margin: '0 auto', wordWrap: 'break-word', overflowWrap: 'break-word', boxSizing: 'border-box' },
   
   card: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '5%', boxSizing: 'border-box', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.03)' },
   introBox: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '20px', marginBottom: '30px', fontSize: '14.5px', overflowWrap: 'break-word', color: '#334155' },
