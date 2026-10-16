@@ -35,11 +35,10 @@ export default function App() {
 
   // State mutlak untuk Bypass AI (Lanjut tanpa AI)
   const [isBypassAI, setIsBypassAI] = useState(false);
-  
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
   const [isValidatingApi, setIsValidatingApi] = useState(false);
 
-  // KANVAS STATE (Dipindah ke atas agar bisa di-reset saat login)
+  // KANVAS STATE
   const [isPasted, setIsPasted] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [formData, setFormData] = useState({ naskahText: '', ennisText: '', polyaText: '' });
@@ -60,7 +59,6 @@ export default function App() {
   const [adminGateInput, setAdminGateInput] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
   
-  // State form dibersihkan saat keluar
   const [teacherNameInput, setTeacherNameInput] = useState('');
   const [subjectInput, setSubjectInput] = useState('');
   const [pinInput, setPinInput] = useState('');
@@ -68,10 +66,8 @@ export default function App() {
   const [showMandiriModal, setShowMandiriModal] = useState(false);
   const [mandiriNameInput, setMandiriNameInput] = useState('');
 
-  // PENGKODEAN PENYIMPANAN ISOLASI
   const getStorageKeys = (kelas, role) => {
     if (role === 'mandiri') return { students: 'PENA_MDR_STU_ISO', submissions: `PENA_MDR_SUB_ISO` };
-    
     if (!kelas) return { students: 'PENA_STU_DEF', submissions: 'PENA_SUB_DEF' };
     const safeCode = kelas.classCode ? kelas.classCode : kelas.pin; 
     return { students: `PENA_C_${safeCode}_STU`, submissions: `PENA_C_${safeCode}_SUB` };
@@ -104,7 +100,6 @@ export default function App() {
         setSubmissions(savedSub ? JSON.parse(savedSub) : []);
       } catch (e) { console.error(e); }
     };
-
     loadClassData();
     window.addEventListener('storage', loadClassData);
     return () => window.removeEventListener('storage', loadClassData);
@@ -144,9 +139,9 @@ export default function App() {
     if (student) {
       setCurrentStudent(student);
       setUserRole('siswa');
-      setIsBypassAI(false); // Reset bypass mode
-      resetCanvasState(); // SAPU BERSIH DATA SISA
-      setActiveTab('introSiswa'); // THE GATEKEEPER
+      setIsBypassAI(false);
+      resetCanvasState();
+      setActiveTab('introSiswa');
     } else {
       alert('❌ Nama atau PIN Siswa salah.');
     }
@@ -199,22 +194,19 @@ export default function App() {
     const name = mandiriNameInput.trim();
     if (!name) return;
     
-    // PEMUSNAHAN DATA HANTU MANDIRI (Sekali Pakai)
     localStorage.removeItem('PENA_MDR_SUB_ISO');
-    
     setCurrentClass(null);
     const newMandiriStudent = { id: 'mandiri-' + Date.now(), name };
     setCurrentStudent(newMandiriStudent);
     setUserRole('mandiri'); 
     setSubmissions([]); 
     setIsBypassAI(false);
-    resetCanvasState(); // SAPU BERSIH KANVAS
+    resetCanvasState();
     
     setShowMandiriModal(false); 
-    setActiveTab('introSiswa'); // THE GATEKEEPER
+    setActiveTab('introSiswa');
   };
 
-  // LOGOUT (Sapu Bersih Semua Form)
   const handleLogout = () => {
     session.clear(); 
     setCurrentStudent(null); setCurrentClass(null); setUserRole(null);
@@ -236,66 +228,66 @@ export default function App() {
 
   const activeSubmissionId = submissions.find(s => s.studentName === currentStudent?.name)?.id;
   const activePortfolio = submissions.find(s => s.id === activeSubmissionId);
-  
-  // LOGIC BUKA SEGEL: Jika status Revisi, segel terbuka!
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Karya Ditolak / Revisi';
-  const isWorkspaceAllowed = isApiValid || isBypassAI; // GATEKEEPER NAVIGATION
+  const isWorkspaceAllowed = isApiValid || isBypassAI; 
 
-  // 🔴 FITUR PING TEST API (Pembaruan UI dan Model gemini-1.5-flash dengan Retry Logic)
+  // ==========================================
+  // API LOGIC 1: CEK PING (AUTO-RETRY SYSTEM)
+  // ==========================================
   const checkApiValidity = async (e) => {
     e.preventDefault();
     const cleanKey = apiKey.trim();
     if (cleanKey.length < 5) { alert('❌ API Key tidak valid.'); return; }
-    
+
     // UI FIXED: Matikan ijo, nyalakan loading state
     setIsValidatingApi(true);
-    setIsApiValid(false); 
-    
+    setIsApiValid(false);
+
     let retries = 3;
     let success = false;
-    
+
     while (retries > 0 && !success) {
       try {
+        // HANYA MENGGUNAKAN 1.5-FLASH
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cleanKey}`, {
-          method: 'POST', 
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts: [{ text: "Balas dengan kata: KONEKSI OK" }] }] })
         });
-        
+
         const data = await res.json();
         if (!res.ok) throw new Error(data.error?.message || "Koneksi ditolak Google API.");
-        
-        // JIKA SUKSES BETULAN
+
+        // JIKA SUKSES
         localStorage.setItem('PENA_AI_KEY', cleanKey);
         setIsApiValid(true);
         setIsBypassAI(false);
         success = true;
-        
-        // Delay UI biar keliatan hijau dulu baru pindah tab
+
         setTimeout(() => {
           alert('✅ Kunci Tervalidasi Google! Segel Kanvas Terbuka.');
           setActiveTab('workspace');
         }, 100);
-        
+
       } catch (err) {
-        if (err.message.includes("high demand") || err.message.includes("quota")) {
+        if (err.message.toLowerCase().includes("high demand") || err.message.toLowerCase().includes("quota") || err.message.toLowerCase().includes("overloaded")) {
           retries--;
           if (retries > 0) {
-             console.log(`Server penuh. Mencoba ulang... sisa ${retries} percobaan.`);
-             await new Promise(r => setTimeout(r, 2000)); // Diam 2 detik sebelum gedor ulang
+            console.log(`Server sibuk. Gedor ulang... sisa ${retries} percobaan.`);
+            await new Promise(r => setTimeout(r, 2000)); // Diam 2 detik, lalu nyoba lagi
           } else {
-             setIsApiValid(false);
-             setTimeout(() => { alert(`❌ SERVER GOOGLE PENUH!\nAntrean masih padat. Tunggu 1 menit lalu coba klik lagi.`); }, 100);
+            setIsApiValid(false);
+            setTimeout(() => { alert(`❌ SERVER GOOGLE SEDANG PENUH!\nAntrean gratisan macet. Silakan tunggu 30 detik lalu klik Uji Ping lagi.`); }, 100);
           }
         } else {
-          // Error lain (bukan karena macet), langsung gagal
+          // Error lain (kunci salah, dll)
           retries = 0;
           setIsApiValid(false);
           setTimeout(() => { alert(`❌ UJI PING GAGAL!\nDetail: ${err.message}`); }, 100);
         }
       }
     }
-    setIsValidatingApi(false); // Matikan loading tombol
+    setIsValidatingApi(false);
   };
 
   const handleBypassAI = () => {
@@ -304,6 +296,9 @@ export default function App() {
     setActiveTab('workspace');
   };
 
+  // ==========================================
+  // API LOGIC 2: SUBMIT KANVAS (AUTO-RETRY SYSTEM)
+  // ==========================================
   const handleSubmitCanvas = async (e) => {
     e.preventDefault();
     setIsSubmittingTask(true);
@@ -313,23 +308,22 @@ export default function App() {
     if (hasViolations) {
       diagnosis = `[GAGAL INTEGRITAS] Terdeteksi perpindahan tab (${tabSwitchCount}x) atau copy-paste. Argumen didiskualifikasi otomatis.`;
     } else if (isBypassAI) {
-      // JIKA BYPASS AI DIAKTIFKAN
       diagnosis = `[EVALUASI MANUAL] Mesin AI dinonaktifkan oleh pengguna. Menunggu tinjauan langsung dan validasi dari Guru.`;
     } else {
-      // PROSES NORMAL DENGAN AI 
       const activeKeyToUse = localStorage.getItem('PENA_AI_KEY') || defaultSysKey;
       if (!activeKeyToUse) {
         alert('API Key tidak ditemukan. Silakan atur kembali di Pengaturan API Key.');
         setActiveTab('introSiswa'); setIsSubmittingTask(false); return;
       }
-      
+
       let retries = 3;
       let success = false;
-      
+
       while (retries > 0 && !success) {
         try {
           const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
           
+          // HANYA MENGGUNAKAN 1.5-FLASH
           const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKeyToUse}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
@@ -345,24 +339,23 @@ export default function App() {
             throw new Error("Respon diblokir keamanan server.");
           }
         } catch (err) {
-           if (err.message.includes("high demand") || err.message.includes("quota")) {
-             retries--;
-             if (retries > 0) {
-               console.log(`Pengiriman antre. Coba lagi... (${retries})`);
-               await new Promise(r => setTimeout(r, 2500)); // Diam 2.5 detik
-             } else {
-               diagnosis = `[ERROR SERVER SIBUK] Google kelebihan beban antrean. Hapus karya ini lalu kirim ulang tugasnya.`;
-             }
-           } else {
-             retries = 0;
-             diagnosis = `[ERROR KONEKSI AI] Gagal memproses nalar. Detail: ${err.message}.`;
-           }
+          if (err.message.toLowerCase().includes("high demand") || err.message.toLowerCase().includes("quota") || err.message.toLowerCase().includes("overloaded")) {
+            retries--;
+            if (retries > 0) {
+              console.log(`Server sibuk saat analisis. Gedor ulang... sisa ${retries} percobaan.`);
+              await new Promise(r => setTimeout(r, 2500)); // Diam 2.5 detik lalu hajar lagi
+            } else {
+              diagnosis = `[ERROR SERVER SIBUK] Mesin AI Google menolak respon (High Demand). Silakan hapus karya ini dan kirim ulang tugasnya beberapa saat lagi.`;
+            }
+          } else {
+            retries = 0;
+            diagnosis = `[ERROR KONEKSI AI] Gagal memproses nalar. Detail: ${err.message}.`;
+          }
         }
       }
     }
 
     const combinedDeconstruction = `[ENNIS]: ${formData.ennisText}\n\n[POLYA]: ${formData.polyaText}`;
-
     const newSubmission = {
       id: Date.now(),
       certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -376,7 +369,6 @@ export default function App() {
       teacherFeedback: ''
     };
     
-    // Timpa jika nama siswa sama (untuk antisipasi revisi dari siswa yang sama)
     const updatedSubmissions = [newSubmission, ...submissions.filter(s => s.studentName !== currentStudent.name)];
     setSubmissions(updatedSubmissions);
     
@@ -408,11 +400,9 @@ export default function App() {
     }
   };
 
-  // CSV EXPORT - DENGAN DELIMITER TITIK KOMA (;) DAN SANITIZER ENTER
+  // CSV EXPORT 
   const handleExportCSV = () => {
     if(submissions.length === 0) { alert("Tidak ada data untuk diekspor"); return; }
-    
-    // Fungsi pembersih karakter: Hapus ENTER (\n\r) diganti spasi, dan bersihkan kutip (") ganda.
     const sanitize = (str) => {
       if(!str) return '""';
       const cleanStr = str.replace(/[\r\n]+/g, ' ').replace(/"/g, '""');
@@ -426,7 +416,6 @@ export default function App() {
       sanitize(s.diagnosis), sanitize(s.teacherFeedback)
     ]);
     
-    // \uFEFF adalah BOM untuk memastikan Excel membaca UTF-8 dengan benar
     const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(";"), ...rows.map(e => e.join(";"))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -437,7 +426,6 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // PEMANTIK DINAMIS
   const getDynamicPrompt = (text) => {
     if (!text || text.trim() === '') return 'naskah tersebut';
     const words = text.trim().split(/\s+/);
@@ -568,17 +556,17 @@ export default function App() {
               <span style={styles.navBadge}>{userRole === 'mandiri' ? 'Mode Privat' : currentClass?.subject}</span>
               <button style={activeTab === 'introSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('introSiswa')}>Pengaturan API Key</button>
               
-              {/* 🔴 STRICT GATEKEEPER PADA NAVIGASI */}
               <button 
                 style={activeTab === 'workspace' ? styles.navActive : (!isWorkspaceAllowed ? {...styles.navBtn, opacity: 0.5, cursor: 'not-allowed'} : styles.navBtn)} 
-                onClick={() => { if(isWorkspaceAllowed) setActiveTab('workspace') }}
+                onClick={() => { if(isWorkspaceAllowed) setActiveTab('workspace') }} 
                 disabled={!isWorkspaceAllowed}
               >
                 Kanvas Pemikiran
               </button>
+              
               <button 
                 style={activeTab === 'portfolio' ? styles.navActive : (!isWorkspaceAllowed ? {...styles.navBtn, opacity: 0.5, cursor: 'not-allowed'} : styles.navBtn)} 
-                onClick={() => { if(isWorkspaceAllowed) setActiveTab('portfolio') }}
+                onClick={() => { if(isWorkspaceAllowed) setActiveTab('portfolio') }} 
                 disabled={!isWorkspaceAllowed}
               >
                 Portofolio AI
@@ -604,7 +592,7 @@ export default function App() {
                 
                 <div style={{...styles.introBox, background: isApiValid ? '#f0fdf4' : (isValidatingApi ? '#eff6ff' : '#fefce8'), borderColor: isApiValid ? '#bbf7d0' : (isValidatingApi ? '#bfdbfe' : '#fef08a')}}>
                   <p style={{margin: '0 0 8px 0', color: isApiValid ? '#166534' : (isValidatingApi ? '#1e3a8a' : '#854d0e')}}>
-                    <b>Status Sistem Vercel Saat Ini: {isApiValid ? '✅ Siap (Tinggal Gas)' : (isValidatingApi ? '⏳ Sedang Menguji...' : '⚠️ Terkena Limit / Kosong')}</b>
+                    <b>Status Sistem Vercel Saat Ini: {isApiValid ? '✅ Siap (Tinggal Gas)' : (isValidatingApi ? '⏳ Sedang Menguji Koneksi...' : '⚠️ Terkena Limit / Kosong')}</b>
                   </p>
                   {!isApiValid && !isValidatingApi && (
                     <p style={{margin: 0, fontSize: '13.5px', color: '#475569', lineHeight: '1.6'}}>Sistem Utama AI belum mendeteksi sesi aktif. Selesaikan opsi di bawah untuk membuka segel Kanvas.</p>
@@ -612,20 +600,17 @@ export default function App() {
                 </div>
 
                 <div style={{display: 'flex', flexDirection: 'column', gap: '30px'}}>
-                  {/* OPSI 1: API MANDIRI (UJI PING NYATA) */}
                   <div style={{border: '1px solid #e2e8f0', padding: '20px', borderRadius: '8px'}}>
                     <h3 style={{marginTop: 0, color: '#0f172a'}}>Opsi Utama: Validasi Kunci AI Pribadi</h3>
-                    <p style={{fontSize: '13px', color: '#475569', lineHeight: '1.6'}}>Mesin AI Gemini mengunci akses tanpa API Key yang sah. Dapatkan kunci AQ... di <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 'bold'}}>Google AI Studio</a>. <br/><b style={{color: '#dc2626'}}>(Catatan: Wajib gunakan email @gmail.com pribadi dan setelan usia akun 18+ agar tidak diblokir Google).</b></p>
-                    
+                    <p style={{fontSize: '13px', color: '#475569', lineHeight: '1.6'}}>Mesin AI Gemini mengunci akses tanpa API Key yang sah. Dapatkan kunci AQ... di <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 'bold'}}>Google AI Studio</a>.</p>
                     <form onSubmit={checkApiValidity}>
                       <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{...styles.input, marginTop: '8px'}} placeholder="Tempel kunci API AQ... di sini..." required />
                       <button type="submit" style={{...styles.btnPrimary, marginTop: '15px', background: '#0f172a'}} disabled={isValidatingApi}>
-                        {isValidatingApi ? 'Menguji Koneksi Google...' : 'Uji Ping & Buka Segel Kanvas'}
+                        {isValidatingApi ? 'Menembus Antrean Google...' : 'Uji Ping & Buka Segel Kanvas'}
                       </button>
                     </form>
                   </div>
 
-                  {/* OPSI 2: BYPASS MANUAL GURU (HANYA UNTUK SISWA, DIHAPUS UNTUK MANDIRI) */}
                   {userRole === 'siswa' && (
                     <div style={{border: '1px solid #fecaca', background: '#fef2f2', padding: '20px', borderRadius: '8px'}}>
                       <h3 style={{marginTop: 0, color: '#991b1b'}}>Opsi Cadangan: Bypass Sistem (Evaluasi Manual)</h3>
@@ -648,7 +633,6 @@ export default function App() {
                   <>
                     <h2 style={{marginTop: 0}}>Kanvas Evaluasi Nalar Terpadu</h2>
                     
-                    {/* Bantuan Notif jika Revisi / Bypass */}
                     {isBypassAI && (
                        <div style={{background: '#fefce8', borderLeft: '4px solid #eab308', padding: '12px', marginBottom: '20px', borderRadius: '4px'}}>
                          <p style={{margin: 0, color: '#854d0e', fontSize: '13.5px'}}><b>ℹ️ Mode Bypass Aktif.</b> Sistem AI mati. Pastikan mengetik dengan jelas agar Guru mudah membaca.</p>
@@ -686,7 +670,7 @@ export default function App() {
                       <textarea rows="6" placeholder="Uraikan aspek Polya..." value={formData.polyaText} onChange={(e) => setFormData({...formData, polyaText: e.target.value})} onPaste={() => setIsPasted(true)} style={{...styles.textarea, marginBottom: '20px'}} required />
 
                       <button type="submit" style={{...styles.btnPrimary, opacity: isSubmittingTask ? 0.7 : 1}} disabled={isSubmittingTask}>
-                        {isSubmittingTask ? 'Memproses Karya...' : isBypassAI ? 'Kirim Kanvas ke Guru' : 'Kunci Nalar & Dapatkan Penilaian AI'}
+                        {isSubmittingTask ? 'Menembus Antrean AI (Loading)...' : isBypassAI ? 'Kirim Kanvas ke Guru' : 'Kunci Nalar & Dapatkan Penilaian AI'}
                       </button>
                     </form>
                   </>
