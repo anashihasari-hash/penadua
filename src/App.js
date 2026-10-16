@@ -9,7 +9,6 @@ const session = {
     try { const item = localStorage.getItem(key); return item ? JSON.parse(item) : fallback; }
     catch (e) { return fallback; }
   },
-  // Sanitasi total saat logout
   clear: () => {
     ['PENA_ROLE', 'PENA_TAB', 'PENA_CLASS', 'PENA_STUDENT'].forEach(k => localStorage.removeItem(k));
   }
@@ -23,15 +22,19 @@ export default function App() {
   const [currentClass, setCurrentClass] = useState(() => session.get('PENA_CLASS', null));
   const [currentStudent, setCurrentStudent] = useState(() => session.get('PENA_STUDENT', null));
   
+  // Deteksi kunci Vercel atau Lokal
+  const defaultSysKey = process.env.REACT_APP_GEMINI_API_KEY || "";
   const [apiKey, setApiKey] = useState(() => {
-    const savedKey = localStorage.getItem('PENA_AI_KEY');
-    return savedKey ? savedKey : (process.env.REACT_APP_GEMINI_API_KEY || "");
+    return localStorage.getItem('PENA_AI_KEY') || defaultSysKey;
   });
   
   const [isApiValid, setIsApiValid] = useState(() => {
-    const active = localStorage.getItem('PENA_AI_KEY') || process.env.REACT_APP_GEMINI_API_KEY || "";
+    const active = localStorage.getItem('PENA_AI_KEY') || defaultSysKey;
     return active.length > 5;
   });
+
+  // State mutlak untuk Bypass AI (Lanjut tanpa AI)
+  const [isBypassAI, setIsBypassAI] = useState(false);
   
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
 
@@ -51,7 +54,7 @@ export default function App() {
   const [adminGateInput, setAdminGateInput] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
   
-  // State login guru (direset tiap buka modal untuk mencegah sisa login)
+  // State form dibersihkan saat keluar
   const [teacherNameInput, setTeacherNameInput] = useState('');
   const [subjectInput, setSubjectInput] = useState('');
   const [pinInput, setPinInput] = useState('');
@@ -59,12 +62,11 @@ export default function App() {
   const [showMandiriModal, setShowMandiriModal] = useState(false);
   const [mandiriNameInput, setMandiriNameInput] = useState('');
 
-  // ISOLASI SESI KETAT UNTUK 30 MURID
-  const getStorageKeys = (kelas, role, studentObj) => {
-    if (role === 'mandiri') {
-      const studentId = studentObj?.id || 'default_mandiri';
-      return { students: 'PENA_MDR_STU_ISO', submissions: `PENA_MDR_SUB_${studentId}` };
-    }
+  // PENGKODEAN PENYIMPANAN ISOLASI
+  const getStorageKeys = (kelas, role) => {
+    // Mandiri selalu pakai 1 kunci terisolasi yang di-reset tiap kali login (Sekali Pakai)
+    if (role === 'mandiri') return { students: 'PENA_MDR_STU_ISO', submissions: `PENA_MDR_SUB_ISO` };
+    
     if (!kelas) return { students: 'PENA_STU_DEF', submissions: 'PENA_SUB_DEF' };
     const safeCode = kelas.classCode ? kelas.classCode : kelas.pin; 
     return { students: `PENA_C_${safeCode}_STU`, submissions: `PENA_C_${safeCode}_SUB` };
@@ -76,19 +78,15 @@ export default function App() {
   useEffect(() => {
     const loadClassData = () => {
       if (userRole === 'mandiri' && currentStudent) {
-        const keys = getStorageKeys(null, 'mandiri', currentStudent);
+        const keys = getStorageKeys(null, 'mandiri');
         const savedSub = localStorage.getItem(keys.submissions);
         setSubmissions(savedSub ? JSON.parse(savedSub) : []);
         setStudents([]);
         return;
       }
-      if (!currentClass) {
-        setSubmissions([]);
-        setStudents([]);
-        return;
-      }
+      if (!currentClass) { setSubmissions([]); setStudents([]); return; }
       
-      const keys = getStorageKeys(currentClass, userRole, currentStudent);
+      const keys = getStorageKeys(currentClass, userRole);
       try {
         const savedStudents = localStorage.getItem(keys.students);
         if (savedStudents) { setStudents(JSON.parse(savedStudents)); } 
@@ -127,7 +125,7 @@ export default function App() {
   const handleStudentLoginFinal = (e) => {
     e.preventDefault();
     const inputName = loginStudentName.trim().toLowerCase();
-    const keys = getStorageKeys(currentClass, 'siswa', null);
+    const keys = getStorageKeys(currentClass, 'siswa');
     const savedStu = localStorage.getItem(keys.students);
     const freshStudentList = savedStu ? JSON.parse(savedStu) : [];
 
@@ -135,7 +133,8 @@ export default function App() {
     if (student) {
       setCurrentStudent(student);
       setUserRole('siswa');
-      setActiveTab('workspace');
+      setIsBypassAI(false); // Reset bypass mode
+      setActiveTab('introSiswa'); // THE GATEKEEPER: Paksa ke Pengaturan API dulu
     } else {
       alert('❌ Nama atau PIN Siswa salah.');
     }
@@ -145,13 +144,10 @@ export default function App() {
     e.preventDefault();
     if (adminGateInput === MASTER_ADMIN_PASSWORD) {
       setShowAdminGate(false);
-      // Bersihkan sisa login form guru sebelumnya
       setTeacherNameInput(''); setSubjectInput(''); setPinInput('');
       setShowPinModal(true);
       setAdminGateInput('');
-    } else {
-      alert('❌ Sandi Admin salah.');
-    }
+    } else { alert('❌ Sandi Admin salah.'); }
   };
 
   const handleRegisterOrLoginGuru = (e) => {
@@ -161,10 +157,8 @@ export default function App() {
     const pin = pinInput.trim();
     
     let targetClass = allClasses.find(c => c.teacher.toLowerCase() === tName.toLowerCase() && c.subject.toLowerCase() === sName.toLowerCase());
-    
-    if (targetClass) {
-      if (targetClass.pin !== pin) { alert('❌ Sandi (PIN) guru salah!'); return; }
-    } else {
+    if (targetClass) { if (targetClass.pin !== pin) { alert('❌ Sandi (PIN) guru salah!'); return; } } 
+    else {
       const classCode = Math.floor(10000 + Math.random() * 90000).toString();
       targetClass = { teacher: tName, subject: sName, pin: pin, classCode: classCode };
       const updated = [...allClasses, targetClass];
@@ -173,10 +167,8 @@ export default function App() {
       alert(`🎉 KELAS DIBUAT!\nKODE AKSES MURID: ${classCode}`);
     }
     
-    setCurrentClass(targetClass);
-    setUserRole('guru');
-    setShowPinModal(false);
-    setActiveTab('guruDashboard');
+    setCurrentClass(targetClass); setUserRole('guru');
+    setShowPinModal(false); setActiveTab('guruDashboard');
   };
 
   const handleForceDeleteGuruClass = () => {
@@ -194,27 +186,29 @@ export default function App() {
     e.preventDefault();
     const name = mandiriNameInput.trim();
     if (!name) return;
+    
+    // PEMUSNAHAN DATA HANTU MANDIRI (Sekali Pakai)
+    localStorage.removeItem('PENA_MDR_SUB_ISO');
+    
     setCurrentClass(null);
     const newMandiriStudent = { id: 'mandiri-' + Date.now(), name };
     setCurrentStudent(newMandiriStudent);
     setUserRole('mandiri'); 
+    setSubmissions([]); // Pastikan array lokal juga bersih
+    setIsBypassAI(false); // Reset bypass
+    
     setShowMandiriModal(false); 
-    
-    const keys = getStorageKeys(null, 'mandiri', newMandiriStudent);
-    const savedSub = localStorage.getItem(keys.submissions);
-    setSubmissions(savedSub ? JSON.parse(savedSub) : []);
-    
-    setActiveTab('workspace');
+    setActiveTab('introSiswa'); // THE GATEKEEPER
   };
 
-  // LOGOUT (Membersihkan Sesi & Form)
+  // LOGOUT (Sapu Bersih Semua Form)
   const handleLogout = () => {
     session.clear(); 
     setCurrentStudent(null); setCurrentClass(null); setUserRole(null);
     setSubmissions([]); setStudents([]); 
-    setActiveTab('landing'); setClassCodeInput('');
-    setLoginStudentName(''); setLoginStudentPin('');
-    setTeacherNameInput(''); setSubjectInput(''); setPinInput('');
+    setActiveTab('landing'); 
+    setClassCodeInput(''); setLoginStudentName(''); setLoginStudentPin('');
+    setTeacherNameInput(''); setSubjectInput(''); setPinInput(''); setMandiriNameInput('');
   };
 
   // --- KANVAS LOGIC ---
@@ -232,7 +226,7 @@ export default function App() {
   const activeSubmissionId = submissions.find(s => s.studentName === currentStudent?.name)?.id;
   const activePortfolio = submissions.find(s => s.id === activeSubmissionId);
   
-  // LOGIC BUKA SEGEL: Jika statusnya Minta Revisi, segel dibuka
+  // LOGIC BUKA SEGEL: Jika status Revisi, segel terbuka!
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Karya Ditolak / Revisi';
 
   const checkApiValidity = (e) => {
@@ -241,43 +235,45 @@ export default function App() {
     if (cleanKey.length < 5) { alert('❌ API Key tidak valid.'); return; }
     localStorage.setItem('PENA_AI_KEY', cleanKey);
     setIsApiValid(true);
-    alert('✅ API Key berhasil disimpan secara lokal!');
+    setIsBypassAI(false);
+    alert('✅ API Key berhasil disimpan! Lanjut ke Kanvas.');
+    setActiveTab('workspace');
+  };
+
+  const handleBypassAI = () => {
+    setIsBypassAI(true);
+    alert('⚠️ Mesin AI Dinonaktifkan. Tugas akan dievaluasi secara manual oleh instruktur/guru.');
     setActiveTab('workspace');
   };
 
   const handleSubmitCanvas = async (e) => {
     e.preventDefault();
-    const activeKeyToUse = localStorage.getItem('PENA_AI_KEY') || process.env.REACT_APP_GEMINI_API_KEY || "";
-    
-    if (!activeKeyToUse) {
-      alert('⚠️ API Key belum terdeteksi. Silakan masukkan API Key Anda di menu Pengaturan API Key.');
-      setActiveTab('introSiswa');
-      return;
-    }
-
     setIsSubmittingTask(true);
     let diagnosis = "";
     const hasViolations = isPasted || tabSwitchCount > 0;
 
     if (hasViolations) {
       diagnosis = `[GAGAL INTEGRITAS] Terdeteksi perpindahan tab (${tabSwitchCount}x) atau copy-paste. Argumen didiskualifikasi otomatis.`;
+    } else if (isBypassAI) {
+      // JIKA BYPASS AI DIAKTIFKAN
+      diagnosis = `[EVALUASI MANUAL] Mesin AI dinonaktifkan oleh pengguna. Menunggu tinjauan langsung dan validasi dari Guru.`;
     } else {
+      // PROSES NORMAL DENGAN AI
+      const activeKeyToUse = localStorage.getItem('PENA_AI_KEY') || defaultSysKey;
+      if (!activeKeyToUse) {
+        alert('API Key tidak ditemukan. Silakan atur kembali di Pengaturan API Key.');
+        setActiveTab('introSiswa'); setIsSubmittingTask(false); return;
+      }
       try {
-        const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa benar-benar logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
+        const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
         
-        // Coba endpoint standar v1beta dulu
-        let endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKeyToUse}`;
-        
-        const res = await fetch(endpointUrl, {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKeyToUse}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
         });
-        
         const data = await res.json();
         
-        if (!res.ok) {
-           throw new Error(data.error?.message || "Kesalahan pada server AI atau versi API tidak cocok.");
-        }
+        if (!res.ok) throw new Error(data.error?.message || "Sistem AI tidak merespons dengan baik.");
         
         if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
           diagnosis = `[HASIL EVALUASI AI] ${data.candidates[0].content.parts[0].text}`;
@@ -285,8 +281,7 @@ export default function App() {
           diagnosis = `[ERROR AI] Respon diblokir oleh standar keamanan server Gemini.`;
         }
       } catch (err) {
-        // Penanganan error lebih ramah manusia
-        diagnosis = `[ERROR KONEKSI AI] Gagal menghubungi mesin analitis. Detail: ${err.message}. Pastikan kunci API aktif, atau buat kunci baru di aistudio.google.com.`;
+        diagnosis = `[ERROR KONEKSI AI] Gagal menghubungi mesin analitis. Detail: ${err.message}.`;
       }
     }
 
@@ -305,10 +300,11 @@ export default function App() {
       teacherFeedback: ''
     };
     
+    // Timpa jika nama siswa sama (untuk antisipasi revisi dari siswa yang sama)
     const updatedSubmissions = [newSubmission, ...submissions.filter(s => s.studentName !== currentStudent.name)];
     setSubmissions(updatedSubmissions);
     
-    const keys = getStorageKeys(currentClass, userRole, currentStudent);
+    const keys = getStorageKeys(currentClass, userRole);
     localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
 
     setIsPasted(false); setTabSwitchCount(0); setIsSubmittingTask(false);
@@ -322,7 +318,7 @@ export default function App() {
   const handleTeacherAction = (id, status) => {
     const updatedSubmissions = submissions.map(item => item.id === id ? { ...item, status, teacherFeedback: teacherNoteInput } : item);
     setSubmissions(updatedSubmissions);
-    const keys = getStorageKeys(currentClass, userRole, currentStudent);
+    const keys = getStorageKeys(currentClass, userRole);
     localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
     setSelectedSubmission(null); setTeacherNoteInput('');
   };
@@ -331,24 +327,31 @@ export default function App() {
     if(window.confirm('Yakin ingin menghapus hasil evaluasi siswa ini? Siswa harus mengulang tugasnya dari awal.')){
       const updatedSubmissions = submissions.filter(item => item.id !== id);
       setSubmissions(updatedSubmissions);
-      const keys = getStorageKeys(currentClass, userRole, currentStudent);
+      const keys = getStorageKeys(currentClass, userRole);
       localStorage.setItem(keys.submissions, JSON.stringify(updatedSubmissions));
     }
   };
 
+  // CSV EXPORT - DENGAN DELIMITER TITIK KOMA (;) DAN SANITIZER ENTER
   const handleExportCSV = () => {
     if(submissions.length === 0) { alert("Tidak ada data untuk diekspor"); return; }
     
-    const headers = ["ID Validasi", "Nama Siswa", "Waktu", "Status", "Pindah Tab", "Kutipan Naskah", "Uraian Siswa", "Diagnosis AI", "Catatan Guru"];
+    // Fungsi pembersih karakter: Hapus ENTER (\n\r) diganti spasi, dan bersihkan kutip (") ganda.
+    const sanitize = (str) => {
+      if(!str) return '""';
+      const cleanStr = str.replace(/[\r\n]+/g, ' ').replace(/"/g, '""');
+      return `"${cleanStr}"`;
+    };
+
+    const headers = ["ID Validasi", "Nama Siswa", "Waktu", "Status Putusan", "Pindah Tab", "Kutipan Naskah", "Uraian Siswa", "Laporan Hasil AI", "Catatan Guru"];
     const rows = submissions.map(s => [
-      s.certNumber, s.studentName, s.timestamp, s.status, s.tabSwitches, 
-      `"${s.naskahText.replace(/"/g, '""')}"`, 
-      `"${s.deconstructionText.replace(/"/g, '""')}"`, 
-      `"${s.diagnosis.replace(/"/g, '""')}"`, 
-      `"${s.teacherFeedback.replace(/"/g, '""')}"`
+      sanitize(s.certNumber), sanitize(s.studentName), sanitize(s.timestamp), sanitize(s.status), 
+      s.tabSwitches, sanitize(s.naskahText), sanitize(s.deconstructionText), 
+      sanitize(s.diagnosis), sanitize(s.teacherFeedback)
     ]);
     
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    // \uFEFF adalah BOM untuk memastikan Excel membaca UTF-8 dengan benar
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(";"), ...rows.map(e => e.join(";"))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -358,7 +361,7 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // POTONGAN TEKS DINAMIS UNTUK PEMANTIK
+  // PEMANTIK DINAMIS
   const getDynamicPrompt = (text) => {
     if (!text || text.trim() === '') return 'naskah tersebut';
     const words = text.trim().split(/\s+/);
@@ -472,7 +475,7 @@ export default function App() {
             <h3>Mode Mandiri</h3>
             <form onSubmit={handleMandiriLogin}>
               <label>Nama Peserta Uji:</label>
-              <input type="text" value={mandiriNameInput} onChange={(e) => setMandiriNameInput(e.target.value)} style={styles.input} required />
+              <input type="text" value={mandiriNameInput} onChange={(e) => setMandiriNameInput(e.target.value)} style={styles.input} required autoComplete="off" />
               <div style={styles.modalActions}>
                 <button type="submit" style={styles.btnPrimary}>Mulai Eksekusi</button>
                 <button type="button" style={styles.textBtn} onClick={() => setShowMandiriModal(false)}>Batal</button>
@@ -505,29 +508,38 @@ export default function App() {
       <main style={styles.main}>
         {(userRole === 'siswa' || userRole === 'mandiri') && currentStudent && (
           <>
-            {/* PERBAIKAN: INSTRUKSI API KEY JELAS & EDUKATIF */}
+            {/* THE GATEKEEPER: Cek API & Mode Manual */}
             {activeTab === 'introSiswa' && (
               <div style={styles.card} className="no-print">
-                <h2>Konfigurasi & Bypass Kunci API</h2>
+                <h2>Konfigurasi Sistem Evaluasi</h2>
                 
-                <div style={{...styles.introBox, background: '#fefce8', borderColor: '#fef08a'}}>
-                  <p style={{margin: '0 0 8px 0', color: '#854d0e'}}><b>Kenapa harus masukin API Key sendiri?</b></p>
-                  <p style={{margin: 0, fontSize: '13.5px', color: '#475569', lineHeight: '1.6'}}>Mesin AI Gemini memiliki limit kuota harian. Agar evaluasi tidak nge-hang saat sistem mendeteksi limit, kamu wajib menggunakan kunci akses pribadi.</p>
-                  <hr style={{border: 0, borderTop: '1px solid #fde047', margin: '15px 0'}}/>
-                  <p style={{margin: '0 0 8px 0', color: '#854d0e'}}><b>Cara Mendapatkan API Key Gratis:</b></p>
-                  <ol style={{margin: 0, paddingLeft: '20px', fontSize: '13px', color: '#475569', lineHeight: '1.6'}}>
-                    <li>Buka tab baru dan kunjungi: <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 'bold'}}>aistudio.google.com/app/apikey</a></li>
-                    <li>Login dengan akun Google kamu.</li>
-                    <li>Klik tombol <b>Create API Key</b> (warna biru) &gt; Pilih <i>Create API key in new project</i>.</li>
-                    <li>Salin teks kodenya (misal: <code>AQ...</code> atau <code>AIzaSy...</code>) dan tempel di kotak bawah ini.</li>
-                  </ol>
+                <div style={{...styles.introBox, background: isApiValid ? '#f0fdf4' : '#fefce8', borderColor: isApiValid ? '#bbf7d0' : '#fef08a'}}>
+                  <p style={{margin: '0 0 8px 0', color: isApiValid ? '#166534' : '#854d0e'}}>
+                    <b>Status Sistem Vercel Saat Ini: {isApiValid ? '✅ Siap (Tinggal Gas)' : '⚠️ Terkena Limit / Kosong'}</b>
+                  </p>
+                  {!isApiValid && (
+                    <p style={{margin: 0, fontSize: '13.5px', color: '#475569', lineHeight: '1.6'}}>Sistem Utama AI mengalami batas limit. Pilih opsi penyelesaian di bawah untuk tetap melanjutkan Kanvas.</p>
+                  )}
                 </div>
 
-                <form onSubmit={checkApiValidity}>
-                  <label style={{fontSize: '13px', fontWeight: 'bold'}}>Kunci API Gemini (Pribadi):</label>
-                  <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{...styles.input, marginTop: '8px'}} placeholder="Tempel kunci API di sini..." required />
-                  <button type="submit" style={{...styles.btnPrimary, marginTop: '15px'}}>Simpan Kunci Lokal</button>
-                </form>
+                <div style={{display: 'flex', flexDirection: 'column', gap: '30px'}}>
+                  {/* OPSI 1: API MANDIRI */}
+                  <div style={{border: '1px solid #e2e8f0', padding: '20px', borderRadius: '8px'}}>
+                    <h3 style={{marginTop: 0, color: '#0f172a'}}>Opsi 1: Lanjut dengan API Pribadi (Otomatis)</h3>
+                    <p style={{fontSize: '13px', color: '#475569', lineHeight: '1.6'}}>Mesin AI Gemini memiliki limit kuota harian. Kamu wajib menggunakan kunci akses pribadi. Buka <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color: '#2563eb', fontWeight: 'bold'}}>aistudio.google.com/app/apikey</a> untuk membuat API Key gratis.</p>
+                    <form onSubmit={checkApiValidity}>
+                      <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{...styles.input, marginTop: '8px'}} placeholder="Tempel kunci API AQ... di sini..." required />
+                      <button type="submit" style={{...styles.btnPrimary, marginTop: '15px', background: '#0f172a'}}>Simpan Kunci Lokal & Buka Kanvas</button>
+                    </form>
+                  </div>
+
+                  {/* OPSI 2: BYPASS MANUAL GURU */}
+                  <div style={{border: '1px solid #fecaca', background: '#fef2f2', padding: '20px', borderRadius: '8px'}}>
+                    <h3 style={{marginTop: 0, color: '#991b1b'}}>Opsi 2: Bypass Sistem (Evaluasi Manual)</h3>
+                    <p style={{fontSize: '13px', color: '#991b1b', lineHeight: '1.6'}}>Jika kamu tidak bisa mendapatkan kunci API, matikan integrasi AI. Jawaban Kanvas kamu akan langsung dikirim untuk dibaca dan dinilai secara manual oleh Guru.</p>
+                    <button onClick={handleBypassAI} style={{...styles.btnPrimary, marginTop: '10px', background: '#dc2626'}}>Lanjutkan Tanpa AI (Manual Guru)</button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -542,7 +554,12 @@ export default function App() {
                   <>
                     <h2 style={{marginTop: 0}}>Kanvas Evaluasi Nalar Terpadu</h2>
                     
-                    {/* Bantuan Notif jika revisi */}
+                    {/* Bantuan Notif jika Revisi / Bypass */}
+                    {isBypassAI && (
+                       <div style={{background: '#fefce8', borderLeft: '4px solid #eab308', padding: '12px', marginBottom: '20px', borderRadius: '4px'}}>
+                         <p style={{margin: 0, color: '#854d0e', fontSize: '13.5px'}}><b>ℹ️ Mode Bypass Aktif.</b> Sistem AI mati. Pastikan mengetik dengan jelas agar Guru mudah membaca.</p>
+                       </div>
+                    )}
                     {activePortfolio && activePortfolio.status === 'Karya Ditolak / Revisi' && (
                        <div style={{background: '#fef2f2', borderLeft: '4px solid #dc2626', padding: '15px', marginBottom: '20px', borderRadius: '4px'}}>
                          <p style={{margin: 0, color: '#b91c1c', fontSize: '13.5px'}}><b>⚠️ Status: Revisi.</b> Segel telah dibuka oleh guru. Silakan perbaiki dekonstruksi Anda dan kirim ulang.</p>
@@ -558,7 +575,6 @@ export default function App() {
                       <label style={{fontWeight: '700', color: '#1e293b'}}>1. Kutipan Sumber Masalah Utama:</label>
                       <textarea rows="3" placeholder="Masukkan premis asli..." value={formData.naskahText} onChange={(e) => setFormData({...formData, naskahText: e.target.value})} style={{...styles.textarea, marginBottom: '20px', marginTop: '5px'}} required />
 
-                      {/* BLOK ENNIS (PEMANTIK DINAMIS) */}
                       <div style={styles.promptBox}>
                         <p style={{margin: '0 0 8px 0', fontWeight: 'bold', color: '#0f172a'}}>🧠 Aspek Dekonstruksi ENNIS (5 Indikator)</p>
                         <p style={{margin: 0, fontSize: '12.5px', color: '#475569', lineHeight: '1.5'}}>
@@ -567,7 +583,6 @@ export default function App() {
                       </div>
                       <textarea rows="6" placeholder="Uraikan aspek Ennis..." value={formData.ennisText} onChange={(e) => setFormData({...formData, ennisText: e.target.value})} onPaste={() => setIsPasted(true)} style={{...styles.textarea, marginBottom: '20px'}} required />
 
-                      {/* BLOK POLYA (PEMANTIK DINAMIS) */}
                       <div style={{...styles.promptBox, borderLeftColor: '#3b82f6'}}>
                         <p style={{margin: '0 0 8px 0', fontWeight: 'bold', color: '#1d4ed8'}}>⚙️ Aspek Penyelesaian POLYA (4 Tahapan)</p>
                         <p style={{margin: 0, fontSize: '12.5px', color: '#475569', lineHeight: '1.5'}}>
@@ -577,7 +592,7 @@ export default function App() {
                       <textarea rows="6" placeholder="Uraikan aspek Polya..." value={formData.polyaText} onChange={(e) => setFormData({...formData, polyaText: e.target.value})} onPaste={() => setIsPasted(true)} style={{...styles.textarea, marginBottom: '20px'}} required />
 
                       <button type="submit" style={{...styles.btnPrimary, opacity: isSubmittingTask ? 0.7 : 1}} disabled={isSubmittingTask}>
-                        {isSubmittingTask ? 'Memproses ke Mesin AI...' : 'Kunci Nalar & Dapatkan Penilaian AI'}
+                        {isSubmittingTask ? 'Memproses Karya...' : isBypassAI ? 'Kirim Kanvas ke Guru' : 'Kunci Nalar & Dapatkan Penilaian AI'}
                       </button>
                     </form>
                   </>
@@ -606,9 +621,9 @@ export default function App() {
                       {activePortfolio.deconstructionText}
                     </div>
 
-                    <div style={{background: '#f0fdf4', padding: '15px', borderLeft: '4px solid #16a34a', marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
-                      <p style={{margin: '0 0 8px 0', color: '#166534', display: 'flex', alignItems: 'center', gap: '5px'}}><b>🤖 Laporan Analisis Mesin AI:</b></p>
-                      <p style={{margin: 0, lineHeight: '1.6', fontSize: '13.5px', color: '#14532d'}}>{activePortfolio.diagnosis}</p>
+                    <div style={{background: activePortfolio.diagnosis.includes('MANUAL') ? '#fefce8' : '#f0fdf4', padding: '15px', borderLeft: `4px solid ${activePortfolio.diagnosis.includes('MANUAL') ? '#eab308' : '#16a34a'}`, marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
+                      <p style={{margin: '0 0 8px 0', color: activePortfolio.diagnosis.includes('MANUAL') ? '#854d0e' : '#166534', display: 'flex', alignItems: 'center', gap: '5px'}}><b>🤖 Laporan Analisis Mesin AI:</b></p>
+                      <p style={{margin: 0, lineHeight: '1.6', fontSize: '13.5px', color: activePortfolio.diagnosis.includes('MANUAL') ? '#713f12' : '#14532d'}}>{activePortfolio.diagnosis}</p>
                     </div>
                     
                     {activePortfolio.teacherFeedback && (
@@ -652,7 +667,7 @@ export default function App() {
                             <tr key={sub.id} style={{borderBottom: '1px solid #f1f5f9', transition: 'all 0.2s'}}>
                               <td style={{padding: '15px 10px'}}>
                                 <b>{sub.studentName}</b><br/>
-                                <span style={{fontSize: '11.5px', color: '#64748b'}}>Pelanggaran: {sub.tabSwitches} Tab | AI: <span style={{color: sub.diagnosis.includes('GAGAL') || sub.diagnosis.includes('ERROR') ? '#dc2626' : '#16a34a', fontWeight: 'bold'}}>{sub.diagnosis.includes('GAGAL') || sub.diagnosis.includes('ERROR') ? 'Ditolak' : 'Lolos'}</span></span>
+                                <span style={{fontSize: '11.5px', color: '#64748b'}}>Pelanggaran: {sub.tabSwitches} Tab | Mode: <span style={{color: sub.diagnosis.includes('MANUAL') ? '#d97706' : sub.diagnosis.includes('GAGAL') || sub.diagnosis.includes('ERROR') ? '#dc2626' : '#16a34a', fontWeight: 'bold'}}>{sub.diagnosis.includes('MANUAL') ? 'Manual Guru' : sub.diagnosis.includes('GAGAL') || sub.diagnosis.includes('ERROR') ? 'Ditolak' : 'AI Lolos'}</span></span>
                               </td>
                               <td style={{padding: '15px 10px', fontWeight: '600', color: sub.status.includes('Ditolak') ? '#dc2626' : '#334155'}}>{sub.status}</td>
                               <td style={{padding: '15px 10px', textAlign: 'right'}} className="no-print">
@@ -686,7 +701,7 @@ export default function App() {
                     const pin = Math.floor(1000 + Math.random() * 9000).toString();
                     const newStudents = [...students, { id: Date.now(), name, pin }];
                     setStudents(newStudents);
-                    const keys = getStorageKeys(currentClass, userRole, currentStudent);
+                    const keys = getStorageKeys(currentClass, userRole);
                     localStorage.setItem(keys.students, JSON.stringify(newStudents));
                     e.target.sName.value = ''; alert(`Berhasil! PIN otentikasi untuk ${name} adalah: ${pin}`);
                   }
@@ -702,7 +717,7 @@ export default function App() {
                       <button style={{background: 'none', border: 'none', color: '#b91c1c', cursor: 'pointer', fontWeight: '700', padding: '5px 10px', borderRadius: '4px'}} onClick={() => {
                         const updated = students.filter(st => st.id !== s.id);
                         setStudents(updated);
-                        localStorage.setItem(getStorageKeys(currentClass, userRole, currentStudent).students, JSON.stringify(updated));
+                        localStorage.setItem(getStorageKeys(currentClass, userRole).students, JSON.stringify(updated));
                       }}>Cabut Akses</button>
                     </li>
                   ))}
@@ -727,9 +742,9 @@ export default function App() {
                     <p style={{color: '#475569', margin: '0 0 5px 0'}}><b>Argumen Dekonstruksi Terpadu:</b></p>
                     <div style={{whiteSpace: 'pre-wrap', color: '#1e293b', background: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', lineHeight: '1.6'}}>{selectedSubmission.deconstructionText}</div>
                     
-                    <div style={{background: '#f0fdf4', padding: '15px', borderLeft: '4px solid #16a34a', marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
-                      <p style={{margin: '0 0 5px 0', color: '#166534'}}><b>🤖 Laporan Analisis Sistem AI:</b></p>
-                      <span style={{color: '#14532d', lineHeight: '1.6'}}>{selectedSubmission.diagnosis}</span>
+                    <div style={{background: selectedSubmission.diagnosis.includes('MANUAL') ? '#fefce8' : '#f0fdf4', padding: '15px', borderLeft: `4px solid ${selectedSubmission.diagnosis.includes('MANUAL') ? '#eab308' : '#16a34a'}`, marginTop: '20px', borderRadius: '0 6px 6px 0'}}>
+                      <p style={{margin: '0 0 5px 0', color: selectedSubmission.diagnosis.includes('MANUAL') ? '#854d0e' : '#166534'}}><b>🤖 Laporan Analisis Sistem:</b></p>
+                      <span style={{color: selectedSubmission.diagnosis.includes('MANUAL') ? '#713f12' : '#14532d', lineHeight: '1.6'}}>{selectedSubmission.diagnosis}</span>
                     </div>
                   </div>
                   
