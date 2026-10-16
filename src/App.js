@@ -232,7 +232,7 @@ export default function App() {
   const isWorkspaceAllowed = isApiValid || isBypassAI; 
 
   // ==========================================
-  // API LOGIC 1: CEK PING (JALUR V1 STABIL)
+  // API LOGIC 1: CEK PING (GEMINI-2.0-FLASH)
   // ==========================================
   const checkApiValidity = async (e) => {
     e.preventDefault();
@@ -247,8 +247,8 @@ export default function App() {
 
     while (retries > 0 && !success) {
       try {
-        // PERUBAHAN: Menggunakan jalur stabil v1, bukan v1beta
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${cleanKey}`, {
+        // MENGGUNAKAN MODEL 2.0-FLASH TERBARU YANG DIDUKUNG SERVER
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${cleanKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts: [{ text: "Balas dengan kata: KONEKSI OK" }] }] })
@@ -294,7 +294,7 @@ export default function App() {
   };
 
   // ==========================================
-  // API LOGIC 2: SUBMIT KANVAS (JALUR V1 STABIL)
+  // API LOGIC 2: SUBMIT KANVAS (GEMINI-2.0-FLASH)
   // ==========================================
   const handleSubmitCanvas = async (e) => {
     e.preventDefault();
@@ -320,8 +320,8 @@ export default function App() {
         try {
           const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
           
-          // PERUBAHAN: Menggunakan jalur stabil v1, bukan v1beta
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${activeKeyToUse}`, {
+          // MENGGUNAKAN MODEL 2.0-FLASH TERBARU
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${activeKeyToUse}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
           });
