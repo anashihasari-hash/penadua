@@ -241,7 +241,7 @@ export default function App() {
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Karya Ditolak / Revisi';
   const isWorkspaceAllowed = isApiValid || isBypassAI; // GATEKEEPER NAVIGATION
 
-  // 🔴 FITUR PING TEST API (Validasi Real-time Server Gemini 3.8-flash)
+  // 🔴 FITUR PING TEST API (Menggunakan gemini-1.5-flash-8b)
   const checkApiValidity = async (e) => {
     e.preventDefault();
     const cleanKey = apiKey.trim();
@@ -249,8 +249,8 @@ export default function App() {
     
     setIsValidatingApi(true);
     try {
-      // 🟢 FIX: UPDATE KE MODEL gemini-3.8-flash
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${cleanKey}`, {
+      // 🟢 FIX: UPDATE KE MODEL gemini-1.5-flash-8b
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=${cleanKey}`, {
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: "Balas dengan kata: KONEKSI OK" }] }] })
@@ -299,8 +299,8 @@ export default function App() {
       try {
         const prompt = `Evaluasi karya analitis siswa berikut secara kritis dan tajam.\n\nKutipan Masalah Utama: "${formData.naskahText}"\n\nAnalisis Aspek Ennis Siswa: "${formData.ennisText}"\nAnalisis Aspek Polya Siswa: "${formData.polyaText}"\n\nInstruksi Evaluasi:\nNilai apakah analisis siswa logis, komprehensif, dan tidak asal-asalan dalam mengimplementasikan indikator Ennis dan Polya. Berikan diagnosis evaluatif (maksimal 4 kalimat) yang langsung menilai esensi jawaban siswa.`;
         
-        // 🟢 FIX: UPDATE KE MODEL gemini-3.8-flash
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${activeKeyToUse}`, {
+        // 🟢 FIX: UPDATE KE MODEL gemini-1.5-flash-8b
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=${activeKeyToUse}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
         });
