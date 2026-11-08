@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 
 // ==========================================
 // KONEKSI FIREBASE (ONLINE LINTAS HP) - AMAN TIDAK DISENTUH
@@ -112,6 +112,11 @@ export default function App() {
   const [isKutipanLocked, setIsKutipanLocked] = useState(false);
   const [isPasted, setIsPasted] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const [pasteChars, setPasteChars] = useState(0);   // total karakter yang ditempel di kotak indikator
+  const [pasteCount, setPasteCount] = useState(0);   // berapa kali paste
+  const [awaySeconds, setAwaySeconds] = useState(0); // total detik keluar halaman
+  const hiddenAtRef = useRef(null);
+  const draftLoadedForRef = useRef(null);
   const [naskahText, setNaskahText] = useState('');
   const [answers, setAnswers] = useState({}); // Menyimpan jawaban per indikator
 
@@ -239,6 +244,7 @@ export default function App() {
   const resetCanvasState = () => {
     setNaskahText(''); setAnswers({});
     setIsPasted(false); setTabSwitchCount(0); setIsKutipanLocked(false);
+    setPasteChars(0); setPasteCount(0); setAwaySeconds(0);
   };
 
   const handleVerifyClassCode = (e) => {
@@ -295,15 +301,24 @@ export default function App() {
   };
 
   const handleForceDeleteGuruClass = async () => {
-    if(window.confirm('🚨 Hapus paksa histori kelas ini beserta siswa dan tugasnya?')) {
-      const tName = teacherNameInput.trim().toLowerCase();
-      const sName = subjectInput.trim().toLowerCase();
-      const target = allClasses.find(c => c.teacher.toLowerCase() === tName && c.subject.toLowerCase() === sName);
-      if(target) {
-        await deleteDoc(doc(db, 'classes', target.id));
-        alert('Histori kelas dibersihkan.');
-      }
-    }
+    const tName = teacherNameInput.trim().toLowerCase();
+    const sName = subjectInput.trim().toLowerCase();
+    const pin = pinInput.trim();
+    if (!tName || !sName || !pin) { alert('Isi Nama Guru, Mata Pelajaran, dan PIN kelas dulu. Penghapusan butuh PIN yang benar.'); return; }
+    const target = allClasses.find(c => c.teacher.toLowerCase() === tName && c.subject.toLowerCase() === sName);
+    if (!target) { alert('Kelas tidak ditemukan.'); return; }
+    if (target.pin !== pin) { alert('❌ PIN salah. Penghapusan dibatalkan.'); return; }
+    const konfirmasi = window.prompt(`🚨 Hapus kelas "${target.subject}" beserta SELURUH siswa dan tugasnya? Tidak bisa dibatalkan.\n\nKetik HAPUS untuk melanjutkan.`);
+    if (konfirmasi !== 'HAPUS') { return; }
+    try {
+      const [stuSnap, subSnap] = await Promise.all([
+        getDocs(query(collection(db, 'students'), where('classCode', '==', target.classCode))),
+        getDocs(query(collection(db, 'submissions'), where('classCode', '==', target.classCode)))
+      ]);
+      await Promise.all([...stuSnap.docs, ...subSnap.docs].map(d => deleteDoc(d.ref)));
+      await deleteDoc(doc(db, 'classes', target.id));
+      alert('Kelas beserta siswa dan tugasnya sudah dihapus.');
+    } catch (err) { alert('Gagal menghapus: ' + err.message); }
   };
 
   // FUNGSI MANAJEMEN INDIKATOR GURU
@@ -342,13 +357,54 @@ export default function App() {
     resetCanvasState(); setShowMandiriModal(false); setActiveTab('introSiswa'); 
   };
 
-  // PENDETEKSI TAB SWITCH
+  // PENDETEKSI PINDAH TAB (mencatat jumlah dan lama keluar halaman)
   useEffect(() => {
     if (activeTab !== 'workspace' || !currentStudent || !isKutipanLocked) return;
-    const handleVisibilityChange = () => { if (document.hidden) setTabSwitchCount(prev => prev + 1); };
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        hiddenAtRef.current = Date.now();
+        setTabSwitchCount(prev => prev + 1);
+      } else if (hiddenAtRef.current) {
+        const secs = Math.round((Date.now() - hiddenAtRef.current) / 1000);
+        hiddenAtRef.current = null;
+        setAwaySeconds(prev => prev + secs);
+      }
+    };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [activeTab, currentStudent, isKutipanLocked]);
+
+  // 💾 DRAF OTOMATIS (tersimpan di perangkat murid, aman dari refresh)
+  const draftKey = currentStudent
+    ? `PENA_DRAFT_${currentClass?.classCode || 'MANDIRI'}_${userRole === 'mandiri' ? currentStudent.name : (currentStudent.id || currentStudent.name)}`
+    : null;
+
+  useEffect(() => {
+    if (!draftKey) { draftLoadedForRef.current = null; return; }
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const d = JSON.parse(raw);
+        setNaskahText(d.naskahText || ''); setAnswers(d.answers || {});
+        setIsKutipanLocked(!!d.isKutipanLocked); setIsPasted(!!d.isPasted);
+        setTabSwitchCount(d.tabSwitchCount || 0); setPasteChars(d.pasteChars || 0);
+        setPasteCount(d.pasteCount || 0); setAwaySeconds(d.awaySeconds || 0);
+      }
+    } catch (err) { /* draf rusak diabaikan */ }
+    draftLoadedForRef.current = draftKey;
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftKey || draftLoadedForRef.current !== draftKey) return;
+    const adaIsi = naskahText.trim() !== '' || Object.values(answers).some(v => v && v.trim() !== '');
+    if (!adaIsi) return;
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({ naskahText, answers, isKutipanLocked, isPasted, tabSwitchCount, pasteChars, pasteCount, awaySeconds, savedAt: Date.now() }));
+      } catch (err) { /* penyimpanan penuh: abaikan */ }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [draftKey, naskahText, answers, isKutipanLocked, isPasted, tabSwitchCount, pasteChars, pasteCount, awaySeconds]);
 
   const activePortfolio = submissions.find(s => s?.studentName === currentStudent?.name);
   const isWorkspaceLocked = activePortfolio && activePortfolio.status !== 'Karya Ditolak / Revisi';
@@ -394,7 +450,31 @@ export default function App() {
   };
 
   const handleAnswerChange = (id, text) => {
+    draftLoadedForRef.current = draftKey; // aktifkan lagi simpan draf setelah pengiriman
     setAnswers({ ...answers, [id]: text });
+  };
+
+  const handlePasteIndikator = (e) => {
+    const teks = (e.clipboardData && e.clipboardData.getData('text')) || '';
+    setIsPasted(true); setPasteCount(prev => prev + 1); setPasteChars(prev => prev + teks.length);
+  };
+
+  const formatDurasi = (detik) => {
+    const d = Math.max(0, Math.round(detik || 0));
+    if (d < 60) return `${d} dtk`;
+    const m = Math.floor(d / 60); const sisa = d % 60;
+    return sisa ? `${m} mnt ${sisa} dtk` : `${m} mnt`;
+  };
+
+  const ringkasIndikasi = (sub) => {
+    const keluar = sub.tabSwitches > 0 ? `${sub.tabSwitches}x keluar halaman${sub.awaySeconds ? ` (${formatDurasi(sub.awaySeconds)})` : ''}` : '';
+    const paste = sub.hasCopyPasted ? `paste${sub.pasteChars ? ` ${sub.pasteChars} karakter` : ''}` : '';
+    return [keluar, paste].filter(Boolean).join(' | ') || 'Bersih';
+  };
+
+  const persenPaste = (sub) => {
+    if (!sub.hasCopyPasted || !sub.pasteChars || !sub.totalChars) return '';
+    return ` (sekitar ${Math.min(100, Math.round((sub.pasteChars / sub.totalChars) * 100))}% dari total tulisan)`;
   };
 
   const handleSubmitCanvas = async (e) => {
@@ -442,6 +522,7 @@ Instruksi Evaluasi:
       }
     }
     
+    const totalChars = activeIndicatorsList.reduce((n, ind) => n + ((answers[ind.id] || '').length), 0);
     const submissionData = {
       classCode: currentClass?.classCode || 'MANDIRI',
       studentName: currentStudent.name,
@@ -449,6 +530,7 @@ Instruksi Evaluasi:
       naskahText: naskahText, 
       deconstructionText: combinedDeconstruction.trim(),
       diagnosis, hasCopyPasted: isPasted, tabSwitches: tabSwitchCount,
+      pasteChars, pasteCount, awaySeconds, totalChars,
       timestamp: new Date().toLocaleString(),
       timestampMs: Date.now(),
       status: userRole === 'mandiri' ? 'Selesai (Auto)' : 'Pending Review Guru',
@@ -461,7 +543,9 @@ Instruksi Evaluasi:
        await addDoc(collection(db, 'submissions'), { ...submissionData, certNumber: `PENA-26-${Math.floor(1000 + Math.random() * 9000)}` });
     }
 
-    setIsPasted(false); setTabSwitchCount(0); setIsSubmittingTask(false);
+    try { if (draftKey) localStorage.removeItem(draftKey); } catch (err) { /* abaikan */ }
+    draftLoadedForRef.current = null;
+    setIsPasted(false); setTabSwitchCount(0); setPasteChars(0); setPasteCount(0); setAwaySeconds(0); setIsSubmittingTask(false);
     setActiveTab('portfolio');
   };
 
@@ -529,13 +613,13 @@ Instruksi Evaluasi:
         /* 📱 RESPONSIVE MEDIA QUERIES UNTUK HP (SUDAH DIPERBAIKI) */
         @media screen and (max-width: 600px) {
            .responsive-hero { padding: 8% 5% !important; width: 100% !important; box-sizing: border-box !important; overflow: hidden !important; }
-           .responsive-title { fontSize: 24px !important; line-height: 1.3 !important; word-wrap: break-word !important; }
-           .responsive-subtitle { fontSize: 14px !important; width: 100% !important; box-sizing: border-box !important; word-wrap: break-word !important; }
+           .responsive-title { font-size: 24px !important; line-height: 1.3 !important; word-wrap: break-word !important; }
+           .responsive-subtitle { font-size: 14px !important; width: 100% !important; box-sizing: border-box !important; word-wrap: break-word !important; }
            .responsive-card { padding: 25px 20px !important; width: 100% !important; box-sizing: border-box !important; overflow: hidden !important; }
-           .responsive-grid { flexDirection: column !important; }
-           .responsive-nav { flexDirection: column !important; alignItems: stretch !important; }
+           .responsive-grid { flex-direction: column !important; }
+           .responsive-nav { flex-direction: column !important; align-items: stretch !important; }
            .responsive-nav button { width: 100% !important; margin-bottom: 5px; }
-           .responsive-table th, .responsive-table td { padding: 12px 10px !important; fontSize: 13px !important; }
+           .responsive-table th, .responsive-table td { padding: 12px 10px !important; font-size: 13px !important; }
         }
 
         @media print { 
@@ -646,7 +730,7 @@ Instruksi Evaluasi:
                 <button type="button" style={styles.btnSecondary} onClick={() => setShowPinModal(false)}>Tutup</button>
               </div>
               <div style={{marginTop: '20px', textAlign: 'center'}}>
-                <button type="button" onClick={handleForceDeleteGuruClass} style={{background: 'none', border: 'none', color: '#dc2626', fontSize: '13px', textDecoration: 'underline', cursor: 'pointer', fontWeight: '600'}}>Lupa PIN? Hapus Histori Kelas Ini</button>
+                <button type="button" onClick={handleForceDeleteGuruClass} style={{background: 'none', border: 'none', color: '#dc2626', fontSize: '13px', textDecoration: 'underline', cursor: 'pointer', fontWeight: '600'}}>Hapus Kelas Ini (butuh PIN)</button>
               </div>
             </form>
           </div>
@@ -781,8 +865,8 @@ Instruksi Evaluasi:
                     ) : (
                        <form onSubmit={handleSubmitCanvas}>
                           <div style={styles.monitor}>
-                            <span>Integritas Layar (Pindah Tab): <b style={{color: tabSwitchCount > 0 ? '#dc2626' : '#16a34a'}}>{tabSwitchCount}x</b></span>
-                            <span>Integritas Input (Paste): <b style={{color: isPasted ? '#dc2626' : '#16a34a'}}>{isPasted ? 'Terdeteksi' : 'Aman'}</b></span>
+                            <span>Integritas Layar (Pindah Tab): <b style={{color: tabSwitchCount > 0 ? '#dc2626' : '#16a34a'}}>{tabSwitchCount}x{tabSwitchCount > 0 ? ` (${formatDurasi(awaySeconds)})` : ''}</b></span>
+                            <span>Integritas Input (Paste): <b style={{color: isPasted ? '#dc2626' : '#16a34a'}}>{isPasted ? `Terdeteksi (${pasteChars} karakter)` : 'Aman'}</b></span>
                           </div>
 
                           <div style={{background: '#f1f5f9', padding: '20px', borderRadius: '8px', marginBottom: '30px', border: '1px solid #e2e8f0'}}>
@@ -806,7 +890,7 @@ Instruksi Evaluasi:
                                  placeholder={`Ketik analisis untuk ${ind.name} di sini...`} 
                                  value={answers[ind.id] || ''} 
                                  onChange={(e) => handleAnswerChange(ind.id, e.target.value)} 
-                                 onPaste={() => setIsPasted(true)} 
+                                 onPaste={handlePasteIndikator} 
                                  style={{...styles.textarea, marginBottom: '10px'}} 
                                  required 
                                />
@@ -898,7 +982,7 @@ Instruksi Evaluasi:
                               <td style={{padding: '18px 15px'}}>
                                 <b style={{fontSize: '15px', color: '#0f172a'}}>{sub.studentName}</b><br/>
                                 <span style={{fontSize: '12.5px', color: '#64748b', marginTop: '5px', display: 'inline-block'}}>
-                                  Pelanggaran: <span style={{color: sub.tabSwitches > 0 || sub.hasCopyPasted ? '#dc2626' : '#16a34a', fontWeight: '800'}}>{sub.tabSwitches} Tab | {sub.hasCopyPasted ? 'Indikasi Paste' : 'Bersih'}</span>
+                                  Indikasi: <span style={{color: sub.tabSwitches > 0 || sub.hasCopyPasted ? '#dc2626' : '#16a34a', fontWeight: '800'}}>{ringkasIndikasi(sub)}</span>
                                 </span>
                               </td>
                               <td style={{padding: '18px 15px', fontWeight: '700', fontSize: '14px', color: sub.status.includes('Ditolak') ? '#dc2626' : '#334155'}}>{sub.status}</td>
@@ -979,7 +1063,8 @@ Instruksi Evaluasi:
                   
                   {(selectedSubmission.tabSwitches > 0 || selectedSubmission.hasCopyPasted) && (
                      <div style={{background: '#fef2f2', borderLeft: '4px solid #dc2626', padding: '15px', marginBottom: '20px', borderRadius: '6px'}}>
-                        <p style={{margin: 0, color: '#b91c1c', fontSize: '14px', fontWeight: '800'}}>🚩 PERINGATAN KECURANGAN: Anak ini terdeteksi {selectedSubmission.tabSwitches > 0 ? `Pindah Tab ${selectedSubmission.tabSwitches} kali` : ''} {selectedSubmission.hasCopyPasted ? '& Melakukan Copy-Paste' : ''} saat menyusun kerangka argumen.</p>
+                        <p style={{margin: 0, color: '#b91c1c', fontSize: '14px', fontWeight: '800'}}>🚩 INDIKASI PERLU DITINJAU: {ringkasIndikasi(selectedSubmission)}{persenPaste(selectedSubmission)} saat menyusun analisis.</p>
+                        <p style={{margin: '8px 0 0 0', color: '#7f1d1d', fontSize: '12.5px', lineHeight: '1.5'}}>Ini sinyal otomatis, bukan bukti. Pindah tab bisa terjadi karena telepon atau notifikasi (terutama di HP). Keputusan akhir ada pada Guru.</p>
                      </div>
                   )}
 
