@@ -17,16 +17,16 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // ==========================================
-// SESSION HELPER (KHUSUS DATA DEVICE LOKAL)
+// SESSION HELPER (per tab: login hilang saat tab ditutup)
 // ==========================================
 const session = {
   set: (key, val) => {
-    if (val === null || val === undefined || val === 'null') { localStorage.removeItem(key); } 
-    else { localStorage.setItem(key, JSON.stringify(val)); }
+    if (val === null || val === undefined || val === 'null') { sessionStorage.removeItem(key); } 
+    else { sessionStorage.setItem(key, JSON.stringify(val)); }
   },
   get: (key, fallback) => {
     try { 
-      const item = localStorage.getItem(key); 
+      const item = sessionStorage.getItem(key); 
       if (!item || item === 'null' || item === 'undefined') return fallback;
       const parsed = JSON.parse(item);
       return parsed !== null ? parsed : fallback;
@@ -34,7 +34,7 @@ const session = {
   },
   clear: () => {
     // PERBAIKAN: Menambahkan kunci bypass dan validasi agar ikut bersih saat logout
-    ['PENA_ROLE', 'PENA_TAB', 'PENA_CLASS', 'PENA_STUDENT', 'PENA_VALIDATED', 'PENA_BYPASSED'].forEach(k => localStorage.removeItem(k));
+    ['PENA_ROLE', 'PENA_TAB', 'PENA_CLASS', 'PENA_STUDENT', 'PENA_VALIDATED', 'PENA_BYPASSED'].forEach(k => sessionStorage.removeItem(k));
   }
 };
 
@@ -57,32 +57,50 @@ const DEFAULT_INDICATORS = [
 // ==========================================
 // 🧠 OTAK AI PENDIDIK (PROMPT DINAMIS)
 // ==========================================
-const callGeminiAPI = async (prompt, apiKey, retries = 3) => {
+const callGeminiAPI = async (prompt, apiKey, retries = 3, timeoutMs = 45000) => {
   if (!apiKey || !apiKey.trim()) throw new Error("API Key belum dimasukkan!");
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey.trim()}`;
-  
-  const payload = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
+  // Tingkat "berpikir" rendah supaya jawaban jauh lebih cepat
+  const buildPayload = (withThinking) => ({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    ...(withThinking ? { generationConfig: { thinkingConfig: { thinkingLevel: 'low' } } } : {})
+  });
+  let withThinking = true;
 
   for (let attempt = 0; attempt < retries; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(buildPayload(withThinking)),
+        signal: ctrl.signal
       });
+      // Jika pengaturan berpikir ditolak, ulangi tanpa pengaturan itu
+      if (response.status === 400 && withThinking) { withThinking = false; attempt--; continue; }
       if ((response.status === 429 || response.status >= 500) && attempt < retries - 1) {
-        await new Promise(resolve => setTimeout(resolve, 3000)); 
+        await new Promise(resolve => setTimeout(resolve, 3000));
         continue;
       }
       if (!response.ok) {
         const errText = await response.text();
-        throw new Error(`Ditolak Google (Status ${response.status}): ${errText}`);
+        const e = new Error(`Ditolak Google (Status ${response.status}): ${errText}`);
+        e.noRetry = true;
+        throw e;
       }
       const result = await response.json();
-      if (result.candidates && result.candidates.length > 0) return result.candidates[0].content.parts[0].text;
-      throw new Error("Format respon AI tidak terbaca");
+      const parts = (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts) || [];
+      const teks = parts.filter(pt => pt.text && !pt.thought).map(pt => pt.text).join('');
+      if (teks) return teks;
+      const e2 = new Error("Format respon AI tidak terbaca");
+      e2.noRetry = true;
+      throw e2;
     } catch (err) {
-      if (attempt === retries - 1) throw err;
+      if (err.name === 'AbortError') throw new Error('Permintaan ke AI melebihi batas waktu. Coba lagi sebentar.');
+      if (err.noRetry || attempt === retries - 1) throw err;
+    } finally {
+      clearTimeout(timer);
     }
   }
 };
