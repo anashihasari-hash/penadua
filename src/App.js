@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, setPersistence, browserSessionPersistence } from 'firebase/auth';
 
 // ==========================================
 // KONEKSI FIREBASE (ONLINE LINTAS HP) - AMAN TIDAK DISENTUH
@@ -15,6 +16,9 @@ const firebaseConfig = {
 };
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
+// Login Google hanya berlaku di tab itu dan hilang saat tab ditutup (aman untuk komputer bersama)
+setPersistence(auth, browserSessionPersistence).catch(() => {});
 
 // ==========================================
 // SESSION HELPER (per tab: login hilang saat tab ditutup)
@@ -38,7 +42,6 @@ const session = {
   }
 };
 
-const MASTER_ADMIN_PASSWORD = "adminpena"; 
 const GEMINI_MODEL = "gemini-3.8-flash"; 
 
 // 9 INDIKATOR FUNDAMENTAL BAWAAN (ENNIS & POLYA)
@@ -148,42 +151,52 @@ export default function App() {
   const [newIndName, setNewIndName] = useState('');
   const [newIndPrompt, setNewIndPrompt] = useState('');
 
-  const [showAdminGate, setShowAdminGate] = useState(false);
-  const [adminGateInput, setAdminGateInput] = useState('');
-  const [showPinModal, setShowPinModal] = useState(false);
-  
-  const [teacherNameInput, setTeacherNameInput] = useState('');
-  const [subjectInput, setSubjectInput] = useState('');
-  const [pinInput, setPinInput] = useState('');
+  // LOGIN GURU (Google / Firebase Authentication)
+  const [authUser, setAuthUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [showGuruModal, setShowGuruModal] = useState(false);
+  const [newClassSubject, setNewClassSubject] = useState('');
+  const [isGuruBusy, setIsGuruBusy] = useState(false);
 
   const [showMandiriModal, setShowMandiriModal] = useState(false);
   const [mandiriNameInput, setMandiriNameInput] = useState('');
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [teacherNoteInput, setTeacherNoteInput] = useState('');
 
+  const myClasses = authUser ? allClasses.filter(c => c.ownerUid === authUser.uid) : [];
   const activeIndicatorsList = userRole === 'mandiri' ? DEFAULT_INDICATORS : (currentClass?.indicators || DEFAULT_INDICATORS);
 
   // 🛡️ SCROLL LOCK PADA POP-UP
   useEffect(() => {
-    if (showAdminGate || showPinModal || showMandiriModal || selectedSubmission) {
+    if (showGuruModal || showMandiriModal || selectedSubmission) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'auto';
     }
     return () => { document.body.style.overflow = 'auto'; };
-  }, [showAdminGate, showPinModal, showMandiriModal, selectedSubmission]);
+  }, [showGuruModal, showMandiriModal, selectedSubmission]);
 
   const doLogout = () => {
     session.clear(); 
+    signOut(auth).catch(() => {});
     setCurrentStudent(null); setCurrentClass(null); setUserRole(null);
     setSubmissions([]); setStudents([]); setActiveTab('landing'); resetCanvasState();
     setClassCodeInput(''); setLoginStudentName(''); setLoginStudentPin('');
-    setTeacherNameInput(''); setSubjectInput(''); setPinInput(''); setMandiriNameInput('');
+    setMandiriNameInput(''); setShowGuruModal(false); setNewClassSubject('');
     setIsApiValid(false); setIsBypassAI(false);
   };
 
+  // 🔐 PANTAU STATUS LOGIN GOOGLE (guru)
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => { setAuthUser(u); setAuthReady(true); });
+    return () => unsub();
+  }, []);
+
   // 🛡️ AUTO-HEALING SYSTEM
   useEffect(() => {
+    if (userRole === 'guru' && authReady && (!authUser || !currentClass || currentClass.ownerUid !== authUser.uid)) {
+      doLogout(); return;
+    }
     if (!userRole) {
       if (activeTab !== 'landing' && activeTab !== 'loginSiswa') setActiveTab('landing');
       return;
@@ -198,7 +211,7 @@ export default function App() {
     }
     session.set('PENA_ROLE', userRole); session.set('PENA_TAB', activeTab);
     session.set('PENA_CLASS', currentClass); session.set('PENA_STUDENT', currentStudent);
-  }, [userRole, activeTab, currentClass, currentStudent]);
+  }, [userRole, activeTab, currentClass, currentStudent, authUser, authReady]);
 
   // 🔥 TARIK DATA KELAS REAL-TIME
   useEffect(() => {
@@ -267,7 +280,7 @@ export default function App() {
 
   const handleVerifyClassCode = (e) => {
     e.preventDefault();
-    const foundClass = allClasses.find(c => c.classCode === classCodeInput.trim() || c.pin === classCodeInput.trim());
+    const foundClass = allClasses.find(c => c.classCode === classCodeInput.trim());
     if (foundClass) {
       setCurrentClass(foundClass); alert(`✅ Kelas ${foundClass.subject} (${foundClass.teacher}) ditemukan!`);
     } else { alert('❌ Kode Akses Kelas tidak ditemukan.'); setCurrentClass(null); }
@@ -289,43 +302,73 @@ export default function App() {
     } else { alert('❌ Nama atau PIN Siswa salah.'); }
   };
 
-  const handleAdminGateSubmit = (e) => {
-    e.preventDefault();
-    if (adminGateInput === MASTER_ADMIN_PASSWORD) {
-      setShowAdminGate(false); setTeacherNameInput(''); setSubjectInput(''); setPinInput('');
-      setShowPinModal(true); setAdminGateInput('');
-    } else { alert('❌ Sandi Admin salah. Silakan hubungi admin.'); }
-  };
-
-  const handleRegisterOrLoginGuru = async (e) => {
-    e.preventDefault();
-    const tName = teacherNameInput.trim();
-    const sName = subjectInput.trim();
-    const pin = pinInput.trim();
-    
-    let targetClass = allClasses.find(c => c.teacher.toLowerCase() === tName.toLowerCase() && c.subject.toLowerCase() === sName.toLowerCase());
-    
-    if (targetClass) { 
-      if (targetClass.pin !== pin) { alert('❌ Sandi (PIN) guru salah!'); return; } 
-    } else {
-      const classCode = Math.floor(10000 + Math.random() * 90000).toString();
-      targetClass = { teacher: tName, subject: sName, pin: pin, classCode: classCode, indicators: DEFAULT_INDICATORS };
-      await addDoc(collection(db, 'classes'), targetClass);
-      alert(`🎉 KELAS DIBUAT!\nKODE AKSES MURID: ${classCode}`);
+  // ==========================================
+  // LOGIN GURU DENGAN GOOGLE + KELAS MILIK GURU
+  // ==========================================
+  const handleGuruGoogleLogin = async () => {
+    if (isGuruBusy) return;
+    setIsGuruBusy(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      await signInWithPopup(auth, provider);
+      setShowGuruModal(true);
+    } catch (err) {
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        // login dibatalkan, tidak perlu pesan
+      } else if (err.code === 'auth/popup-blocked') {
+        alert('Pop-up login diblokir browser. Izinkan pop-up untuk situs ini, lalu coba lagi.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        alert('Alamat web ini belum didaftarkan di Firebase (Authorized domains). Hubungi admin.');
+      } else {
+        alert('Gagal masuk dengan Google: ' + (err.message || err.code));
+      }
+    } finally {
+      setIsGuruBusy(false);
     }
-    
-    setCurrentClass(targetClass); setUserRole('guru'); setLocalIndicators(targetClass.indicators || DEFAULT_INDICATORS);
-    setShowPinModal(false); setActiveTab('guruDashboard');
   };
 
-  const handleForceDeleteGuruClass = async () => {
-    const tName = teacherNameInput.trim().toLowerCase();
-    const sName = subjectInput.trim().toLowerCase();
-    const pin = pinInput.trim();
-    if (!tName || !sName || !pin) { alert('Isi Nama Guru, Mata Pelajaran, dan PIN kelas dulu. Penghapusan butuh PIN yang benar.'); return; }
-    const target = allClasses.find(c => c.teacher.toLowerCase() === tName && c.subject.toLowerCase() === sName);
-    if (!target) { alert('Kelas tidak ditemukan.'); return; }
-    if (target.pin !== pin) { alert('❌ PIN salah. Penghapusan dibatalkan.'); return; }
+  const handleOpenClassGuru = (kelas) => {
+    setCurrentClass(kelas);
+    setUserRole('guru');
+    setLocalIndicators(kelas.indicators || DEFAULT_INDICATORS);
+    setShowGuruModal(false);
+    setActiveTab('guruDashboard');
+  };
+
+  const handleCreateClassGuru = async (e) => {
+    e.preventDefault();
+    if (!authUser) return;
+    const sName = newClassSubject.trim();
+    if (!sName) return;
+    if (myClasses.some(c => (c.subject || '').toLowerCase() === sName.toLowerCase())) {
+      alert('Kamu sudah punya kelas dengan nama itu.');
+      return;
+    }
+    let classCode;
+    do { classCode = Math.floor(10000 + Math.random() * 90000).toString(); }
+    while (allClasses.some(c => c.classCode === classCode));
+    const data = {
+      teacher: authUser.displayName || authUser.email,
+      subject: sName,
+      classCode: classCode,
+      indicators: DEFAULT_INDICATORS,
+      ownerUid: authUser.uid,
+      ownerEmail: authUser.email,
+      createdAt: Date.now()
+    };
+    try {
+      const ref = await addDoc(collection(db, 'classes'), data);
+      setNewClassSubject('');
+      alert(`🎉 KELAS DIBUAT!\nKODE AKSES MURID: ${classCode}`);
+      handleOpenClassGuru({ id: ref.id, ...data });
+    } catch (err) {
+      alert('Gagal membuat kelas: ' + err.message);
+    }
+  };
+
+  const handleDeleteClassGuru = async (target) => {
+    if (!authUser || target.ownerUid !== authUser.uid) return;
     const konfirmasi = window.prompt(`🚨 Hapus kelas "${target.subject}" beserta SELURUH siswa dan tugasnya? Tidak bisa dibatalkan.\n\nKetik HAPUS untuk melanjutkan.`);
     if (konfirmasi !== 'HAPUS') { return; }
     try {
@@ -336,7 +379,16 @@ export default function App() {
       await Promise.all([...stuSnap.docs, ...subSnap.docs].map(d => deleteDoc(d.ref)));
       await deleteDoc(doc(db, 'classes', target.id));
       alert('Kelas beserta siswa dan tugasnya sudah dihapus.');
-    } catch (err) { alert('Gagal menghapus: ' + err.message); }
+    } catch (err) {
+      alert('Gagal menghapus: ' + err.message);
+    }
+  };
+
+  const handleGantiKelasGuru = () => {
+    session.clear();
+    setCurrentClass(null); setUserRole(null);
+    setSubmissions([]); setStudents([]);
+    setActiveTab('landing'); setShowGuruModal(true);
   };
 
   // FUNGSI MANAJEMEN INDIKATOR GURU
@@ -674,32 +726,45 @@ Instruksi Evaluasi:
               <h3 style={styles.menuTitle}>Mode Mandiri</h3>
               <p style={styles.menuDesc}>Lakukan simulasi dan validasi pemikiran personal secara terisolasi tanpa guru.</p>
             </div>
-            <div style={styles.menuBox} onClick={() => setShowAdminGate(true)}>
+            <div style={styles.menuBox} onClick={() => (authUser ? setShowGuruModal(true) : handleGuruGoogleLogin())}>
               <div style={styles.iconCircle}>👨‍🏫</div>
               <h3 style={styles.menuTitle}>Gerbang Instruktur</h3>
-              <p style={styles.menuDesc}>Manajemen kelas, pengaturan indikator analitik, dan validasi evaluasi siswa.</p>
+              <p style={styles.menuDesc}>Masuk dengan akun Google untuk mengelola kelas, mengatur indikator, dan menilai tulisan siswa.</p>
             </div>
           </div>
         </div>
       )}
 
-      {showAdminGate && (
+      {showGuruModal && authUser && (
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard} className="responsive-card">
-            <div style={{textAlign: 'center', marginBottom: '20px'}}>
-              <h3 style={styles.modalTitle}>Gerbang Terbatas Instruktur</h3>
-              <p style={styles.modalDesc}>Sistem manajemen evaluasi siswa memerlukan otorisasi. Silakan masukkan Sandi Master.</p>
-            </div>
-            <form onSubmit={handleAdminGateSubmit}>
-              <input type="password" placeholder="Masukkan Sandi Master..." value={adminGateInput} onChange={(e) => setAdminGateInput(e.target.value)} style={styles.input} required />
+            <h3 style={styles.modalTitle}>Kelas Saya</h3>
+            <p style={styles.modalDesc}>Masuk sebagai <b>{authUser.displayName || authUser.email}</b> ({authUser.email}).</p>
+            {myClasses.length === 0 ? (
+              <p style={{color: '#64748b', fontSize: '14px', background: '#f8fafc', padding: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center'}}>Kamu belum punya kelas. Buat kelas pertamamu di bawah.</p>
+            ) : (
+              <div style={{display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px'}}>
+                {myClasses.map(c => (
+                  <div key={c.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '8px', flexWrap: 'wrap'}}>
+                    <div><b>{c.subject}</b><br/><span style={{fontSize: '13px', color: '#64748b'}}>Kode murid: {c.classCode}</span></div>
+                    <div style={{display: 'flex', gap: '12px', alignItems: 'center'}}>
+                      <button type="button" style={{...styles.btnPrimary, width: 'auto', padding: '8px 18px'}} onClick={() => handleOpenClassGuru(c)}>Buka</button>
+                      <button type="button" style={{background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontWeight: '600', fontSize: '13px', textDecoration: 'underline'}} onClick={() => handleDeleteClassGuru(c)}>Hapus</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <form onSubmit={handleCreateClassGuru} autoComplete="off">
+              <label style={styles.label}>Buat kelas baru (nama mata pelajaran):</label>
+              <input type="text" value={newClassSubject} onChange={(e) => setNewClassSubject(e.target.value)} style={styles.input} placeholder="Contoh: Bahasa Indonesia X-A" required autoComplete="off" />
               <div style={styles.modalActions}>
-                <button type="submit" style={styles.btnPrimary}>Buka Portal Instruktur</button>
-                <button type="button" style={styles.btnSecondary} onClick={() => setShowAdminGate(false)}>Kembali</button>
+                <button type="submit" style={styles.btnPrimary}>Buat Kelas</button>
+                <button type="button" style={styles.btnSecondary} onClick={() => setShowGuruModal(false)}>Tutup</button>
               </div>
             </form>
-            <div style={styles.contactBox}>
-              <p style={{margin: 0}}><b>Belum Punya Akses?</b></p>
-              <p style={{margin: '5px 0 0 0'}}>Dapatkan lisensi Trial & Berbayar khusus Instruktur dengan menghubungi:<br/><a href="mailto:anashihasari@gmail.com" style={styles.contactLink}>anashihasari@gmail.com</a></p>
+            <div style={{marginTop: '16px', textAlign: 'center'}}>
+              <button type="button" style={styles.textBtn} onClick={doLogout}>Keluar dari akun Google</button>
             </div>
           </div>
         </div>
@@ -728,30 +793,6 @@ Instruksi Evaluasi:
               </div>
             </form>
           )}
-        </div>
-      )}
-
-      {showPinModal && (
-        <div style={styles.modalOverlay} className="no-print">
-          <div style={styles.modalCard} className="responsive-card">
-            <h3 style={styles.modalTitle}>Otorisasi Instruktur</h3>
-            <p style={styles.modalDesc}>Buat kelas baru atau masuk ke kelas yang sudah ada menggunakan identitas Anda.</p>
-            <form onSubmit={handleRegisterOrLoginGuru} autoComplete="off">
-              <label style={styles.label}>Nama Guru:</label>
-              <input type="text" value={teacherNameInput} onChange={(e) => setTeacherNameInput(e.target.value)} style={styles.input} required autoComplete="off" />
-              <label style={styles.label}>Mata Pelajaran:</label>
-              <input type="text" value={subjectInput} onChange={(e) => setSubjectInput(e.target.value)} style={styles.input} required autoComplete="off" />
-              <label style={styles.label}>PIN Kelas Pengaman (Buat Bebas):</label>
-              <input type="password" value={pinInput} onChange={(e) => setPinInput(e.target.value)} style={styles.input} required autoComplete="new-password" />
-              <div style={styles.modalActions}>
-                <button type="submit" style={styles.btnPrimary}>Masuk / Buat Ruang</button>
-                <button type="button" style={styles.btnSecondary} onClick={() => setShowPinModal(false)}>Tutup</button>
-              </div>
-              <div style={{marginTop: '20px', textAlign: 'center'}}>
-                <button type="button" onClick={handleForceDeleteGuruClass} style={{background: 'none', border: 'none', color: '#dc2626', fontSize: '13px', textDecoration: 'underline', cursor: 'pointer', fontWeight: '600'}}>Hapus Kelas Ini (butuh PIN)</button>
-              </div>
-            </form>
-          </div>
         </div>
       )}
 
@@ -801,6 +842,7 @@ Instruksi Evaluasi:
               <button style={activeTab === 'guruDashboard' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruDashboard')}>Dasbor Evaluasi</button>
               <button style={activeTab === 'guruSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruSiswa')}>Manajemen Peserta</button>
               <button style={activeTab === 'guruIndikator' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruIndikator')}>Manajemen Indikator</button>
+              <button style={styles.navBtn} onClick={handleGantiKelasGuru}>Ganti Kelas</button>
             </>
           )}
         </nav>
