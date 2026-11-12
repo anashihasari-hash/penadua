@@ -6,13 +6,15 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChang
 // ==========================================
 // KONEKSI FIREBASE (ONLINE LINTAS HP) - AMAN TIDAK DISENTUH
 // ==========================================
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "AIzaSyDgur_aBdmwrzJF9bAgP-HbiHXfnB3Scbw",
+  apiKey: "AIzaSyDgur_aBdmwrzJF9bAgP-HbiHXFn03Scbw",
   authDomain: "penadua-220ff.firebaseapp.com",
   projectId: "penadua-220ff",
   storageBucket: "penadua-220ff.firebasestorage.app",
   messagingSenderId: "238367788618",
-  appId: "1:238367788618:web:0b3c202b5c84c7caa468b3"
+  appId: "1:238367788618:web:0b3c202b5c84c7caa460b3",
+  measurementId: "G-BDMGHNBBDM"
 };
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
