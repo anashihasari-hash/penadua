@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, setPersistence, browserSessionPersistence } from 'firebase/auth';
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDocs, setDoc } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, setPersistence, browserSessionPersistence, deleteUser, reauthenticateWithPopup } from 'firebase/auth';
 
 // ==========================================
 // KONEKSI FIREBASE (ONLINE LINTAS HP) - AMAN TIDAK DISENTUH
@@ -110,6 +110,69 @@ const callGeminiAPI = async (prompt, apiKey, retries = 3, timeoutMs = 45000) => 
   }
 };
 
+// ==========================================
+// TINGKAT KEPERCAYAAN GURU & PROFIL
+// ==========================================
+// Domain email guru resmi yang dianggap "Terverifikasi" (nantinya dikelola dari panel admin).
+// Hanya domain khusus guru. Domain siswa sengaja tidak dimasukkan.
+const TRUSTED_TEACHER_DOMAINS = ['guru.sd.belajar.id', 'guru.smp.belajar.id', 'guru.sma.belajar.id'];
+const TRUST_LIMITS = {
+  percobaan: { kelas: 1, siswa: 30 },
+  terverifikasi: { kelas: 10, siswa: 200 }
+};
+const JENJANG_OPTIONS = ['SD/MI', 'SMP/MTs', 'SMA/MA', 'SMK', 'Perguruan Tinggi', 'Lainnya'];
+
+const computeTrust = (email) => {
+  const domain = ((email || '').toLowerCase().split('@')[1]) || '';
+  return TRUSTED_TEACHER_DOMAINS.includes(domain) ? 'terverifikasi' : 'percobaan';
+};
+const trustLabel = (level) => (level === 'terverifikasi' ? '✅ Terverifikasi' : '🧪 Percobaan');
+
+const initialsOf = (name) => {
+  const huruf = (name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('');
+  return (huruf || '?').toUpperCase();
+};
+
+// Kecilkan foto di browser (maks 256x256, dipotong persegi) lalu jadikan teks agar muat di database
+const resizeImageToDataUrl = (file, size = 256) => new Promise((resolve, reject) => {
+  const tipeBoleh = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!file || !tipeBoleh.includes(file.type)) { reject(new Error('Gunakan foto berformat JPG, PNG, atau WebP.')); return; }
+  if (file.size > 5 * 1024 * 1024) { reject(new Error('Ukuran foto terlalu besar (maksimal 5 MB).')); return; }
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error('Foto tidak bisa dibaca.'));
+  reader.onload = () => {
+    const img = new Image();
+    img.onerror = () => reject(new Error('Foto tidak valid.'));
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const skala = Math.max(size / img.width, size / img.height);
+      const w = img.width * skala; const h = img.height * skala;
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size);
+      ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+const renderAvatar = (prof, user, size) => {
+  const nama = (prof && prof.displayName) || (user && user.displayName) || (user && user.email) || '?';
+  const mode = (prof && prof.photoMode) || 'google';
+  let src = null;
+  if (mode === 'upload' && prof && prof.photoData) src = prof.photoData;
+  else if (mode === 'google' && user && user.photoURL) src = user.photoURL;
+  const dasar = { width: size, height: size, borderRadius: '50%', flexShrink: 0 };
+  if (src) return <img src={src} alt="Foto profil" referrerPolicy="no-referrer" style={{...dasar, objectFit: 'cover'}} />;
+  return (
+    <div style={{...dasar, background: '#0f172a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: Math.round(size * 0.4)}}>
+      {initialsOf(nama)}
+    </div>
+  );
+};
+
 export default function App() {
   // STATE LOKAL USER AKTIF
   const [userRole, setUserRole] = useState(() => session.get('PENA_ROLE', null)); 
@@ -160,23 +223,29 @@ export default function App() {
   const [newClassSubject, setNewClassSubject] = useState('');
   const [isGuruBusy, setIsGuruBusy] = useState(false);
 
-  const [showMandiriModal, setShowMandiriModal] = useState(false);
-  const [mandiriNameInput, setMandiriNameInput] = useState('');
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [teacherNoteInput, setTeacherNoteInput] = useState('');
 
+  // PROFIL GURU
+  const [profile, setProfile] = useState(null);
+  const [showProfilModal, setShowProfilModal] = useState(false);
+  const [profileForm, setProfileForm] = useState({ displayName: '', school: '', jenjang: '', mapel: '', photoMode: 'google', photoData: '' });
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const deletingAccountRef = useRef(false);
   const myClasses = authUser ? allClasses.filter(c => c.ownerUid === authUser.uid) : [];
-  const activeIndicatorsList = userRole === 'mandiri' ? DEFAULT_INDICATORS : (currentClass?.indicators || DEFAULT_INDICATORS);
+  const trustLevelNow = (profile && profile.trustLevel) || (authUser ? computeTrust(authUser.email) : 'percobaan');
+  const activeIndicatorsList = currentClass?.indicators || DEFAULT_INDICATORS;
 
   // 🛡️ SCROLL LOCK PADA POP-UP
   useEffect(() => {
-    if (showGuruModal || showMandiriModal || selectedSubmission) {
+    if (showGuruModal || showProfilModal || selectedSubmission) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'auto';
     }
     return () => { document.body.style.overflow = 'auto'; };
-  }, [showGuruModal, showMandiriModal, selectedSubmission]);
+  }, [showGuruModal, showProfilModal, selectedSubmission]);
 
   const doLogout = () => {
     session.clear(); 
@@ -184,7 +253,7 @@ export default function App() {
     setCurrentStudent(null); setCurrentClass(null); setUserRole(null);
     setSubmissions([]); setStudents([]); setActiveTab('landing'); resetCanvasState();
     setClassCodeInput(''); setLoginStudentName(''); setLoginStudentPin('');
-    setMandiriNameInput(''); setShowGuruModal(false); setNewClassSubject('');
+    setShowGuruModal(false); setShowProfilModal(false); setNewClassSubject('');
     setIsApiValid(false); setIsBypassAI(false);
   };
 
@@ -194,8 +263,39 @@ export default function App() {
     return () => unsub();
   }, []);
 
+  // 👤 PANTAU PROFIL GURU (dibuat otomatis saat pertama login)
+  useEffect(() => {
+    if (!authUser) { setProfile(null); return; }
+    const ref = doc(db, 'users', authUser.uid);
+    const unsub = onSnapshot(ref, async (snap) => {
+      if (deletingAccountRef.current) return;
+      const trust = computeTrust(authUser.email);
+      if (snap.exists()) {
+        const d = snap.data();
+        // Naik tingkat otomatis bila email cocok pola guru resmi (tidak pernah turun otomatis)
+        if (trust === 'terverifikasi' && d.trustLevel !== 'terverifikasi') {
+          updateDoc(ref, { trustLevel: 'terverifikasi', trustReason: 'domain-email-guru', updatedAt: Date.now() }).catch(() => {});
+        }
+        setProfile({ id: snap.id, ...d });
+      } else {
+        const baru = {
+          displayName: authUser.displayName || (authUser.email || '').split('@')[0],
+          email: authUser.email || '',
+          school: '', jenjang: '', mapel: '',
+          photoMode: authUser.photoURL ? 'google' : 'initials', photoData: '',
+          trustLevel: trust,
+          trustReason: trust === 'terverifikasi' ? 'domain-email-guru' : 'daftar-sendiri',
+          createdAt: Date.now(), updatedAt: Date.now()
+        };
+        try { await setDoc(ref, baru); } catch (err) { setProfile({ id: authUser.uid, ...baru }); }
+      }
+    }, () => { /* gagal membaca profil: abaikan */ });
+    return () => unsub();
+  }, [authUser]);
+
   // 🛡️ AUTO-HEALING SYSTEM
   useEffect(() => {
+    if (userRole && userRole !== 'siswa' && userRole !== 'guru') { doLogout(); return; }
     if (userRole === 'guru' && authReady && (!authUser || !currentClass || currentClass.ownerUid !== authUser.uid)) {
       doLogout(); return;
     }
@@ -203,10 +303,10 @@ export default function App() {
       if (activeTab !== 'landing' && activeTab !== 'loginSiswa') setActiveTab('landing');
       return;
     }
-    if ((userRole === 'siswa' || userRole === 'mandiri') && !currentStudent) {
+    if (userRole === 'siswa' && !currentStudent) {
         doLogout(); return;
     }
-    if (userRole === 'siswa' || userRole === 'mandiri') {
+    if (userRole === 'siswa') {
         if (activeTab === 'guruDashboard' || activeTab === 'guruSiswa' || activeTab === 'guruIndikator') setActiveTab('introSiswa');
     } else if (userRole === 'guru') {
         if (activeTab !== 'guruDashboard' && activeTab !== 'guruSiswa' && activeTab !== 'guruIndikator') setActiveTab('guruDashboard');
@@ -236,16 +336,10 @@ export default function App() {
 
   // 🔥 TARIK DATA SISWA & TUGAS
   useEffect(() => {
-    if (!currentClass && userRole !== 'mandiri') { setSubmissions([]); setStudents([]); return; }
+    if (!currentClass) { setSubmissions([]); setStudents([]); return; }
 
-    let qStu, qSub;
-    if (userRole === 'mandiri') {
-      qSub = query(collection(db, 'submissions'), where('mode', '==', 'Mandiri (Privat)'), where('studentName', '==', currentStudent?.name || ''));
-      qStu = null;
-    } else {
-      qStu = query(collection(db, 'students'), where('classCode', '==', currentClass.classCode));
-      qSub = query(collection(db, 'submissions'), where('classCode', '==', currentClass.classCode));
-    }
+    const qStu = query(collection(db, 'students'), where('classCode', '==', currentClass.classCode));
+    const qSub = query(collection(db, 'submissions'), where('classCode', '==', currentClass.classCode));
 
     let unsubStu = () => {};
     if (qStu) {
@@ -305,6 +399,97 @@ export default function App() {
   };
 
   // ==========================================
+  // PROFIL GURU
+  // ==========================================
+  const openProfil = () => {
+    setProfileForm({
+      displayName: (profile && profile.displayName) || (authUser && authUser.displayName) || '',
+      school: (profile && profile.school) || '',
+      jenjang: (profile && profile.jenjang) || '',
+      mapel: (profile && profile.mapel) || '',
+      photoMode: (profile && profile.photoMode) || (authUser && authUser.photoURL ? 'google' : 'initials'),
+      photoData: (profile && profile.photoData) || ''
+    });
+    setShowProfilModal(true);
+  };
+
+  const handlePhotoFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const dataUrl = await resizeImageToDataUrl(file, 256);
+      setProfileForm(f => ({ ...f, photoMode: 'upload', photoData: dataUrl }));
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleSaveProfile = async (e) => {
+    e.preventDefault();
+    if (!authUser || isSavingProfile) return;
+    const nama = profileForm.displayName.trim();
+    if (nama.length < 2) { alert('Nama tampilan minimal 2 huruf.'); return; }
+    setIsSavingProfile(true);
+    try {
+      const modeFoto = (profileForm.photoMode === 'upload' && !profileForm.photoData) ? 'initials' : profileForm.photoMode;
+      const data = {
+        displayName: nama.slice(0, 60),
+        school: profileForm.school.trim().slice(0, 80),
+        jenjang: profileForm.jenjang,
+        mapel: profileForm.mapel.trim().slice(0, 60),
+        photoMode: modeFoto,
+        photoData: modeFoto === 'upload' ? profileForm.photoData : '',
+        updatedAt: Date.now()
+      };
+      await setDoc(doc(db, 'users', authUser.uid), data, { merge: true });
+      // Nama guru di semua kelas miliknya ikut diperbarui
+      await Promise.all(myClasses.filter(c => c.teacher !== data.displayName).map(c => updateDoc(doc(db, 'classes', c.id), { teacher: data.displayName })));
+      setShowProfilModal(false);
+    } catch (err) {
+      alert('Gagal menyimpan profil: ' + err.message);
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!authUser || isDeletingAccount) return;
+    const konfirmasi = window.prompt('🚨 Hapus akunmu dan SEMUA datanya (profil, kelas, siswa, dan tugas)? Tidak bisa dibatalkan.\n\nKetik HAPUS AKUN untuk melanjutkan.');
+    if (konfirmasi !== 'HAPUS AKUN') return;
+    setIsDeletingAccount(true);
+    deletingAccountRef.current = true;
+    try {
+      // 1) Login ulang dulu agar penghapusan akun diizinkan Firebase
+      await reauthenticateWithPopup(auth.currentUser, new GoogleAuthProvider());
+      // 2) Hapus semua kelas milik guru beserta siswa dan tugasnya
+      const kelasSnap = await getDocs(query(collection(db, 'classes'), where('ownerUid', '==', authUser.uid)));
+      for (const kd of kelasSnap.docs) {
+        const kode = kd.data().classCode;
+        const [stuSnap, subSnap] = await Promise.all([
+          getDocs(query(collection(db, 'students'), where('classCode', '==', kode))),
+          getDocs(query(collection(db, 'submissions'), where('classCode', '==', kode)))
+        ]);
+        await Promise.all([...stuSnap.docs, ...subSnap.docs].map(d => deleteDoc(d.ref)));
+        await deleteDoc(kd.ref);
+      }
+      // 3) Hapus profil, lalu akun loginnya
+      await deleteDoc(doc(db, 'users', authUser.uid));
+      await deleteUser(auth.currentUser);
+      setShowProfilModal(false);
+      doLogout();
+      alert('Akun dan seluruh datamu sudah dihapus.');
+    } catch (err) {
+      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+        alert('Gagal menghapus akun: ' + (err.message || err.code));
+      }
+    } finally {
+      deletingAccountRef.current = false;
+      setIsDeletingAccount(false);
+    }
+  };
+
+  // ==========================================
   // LOGIN GURU DENGAN GOOGLE + KELAS MILIK GURU
   // ==========================================
   const handleGuruGoogleLogin = async () => {
@@ -343,6 +528,11 @@ export default function App() {
     if (!authUser) return;
     const sName = newClassSubject.trim();
     if (!sName) return;
+    const batasKelas = (TRUST_LIMITS[trustLevelNow] || TRUST_LIMITS.percobaan).kelas;
+    if (myClasses.length >= batasKelas) {
+      alert(`Akun ${trustLevelNow === 'terverifikasi' ? 'Terverifikasi' : 'Percobaan'} dibatasi ${batasKelas} kelas.${trustLevelNow !== 'terverifikasi' ? '\nUntuk menambah kelas, masuk dengan akun email guru belajar.id atau hubungi admin untuk kode undangan.' : ''}`);
+      return;
+    }
     if (myClasses.some(c => (c.subject || '').toLowerCase() === sName.toLowerCase())) {
       alert('Kamu sudah punya kelas dengan nama itu.');
       return;
@@ -351,7 +541,7 @@ export default function App() {
     do { classCode = Math.floor(10000 + Math.random() * 90000).toString(); }
     while (allClasses.some(c => c.classCode === classCode));
     const data = {
-      teacher: authUser.displayName || authUser.email,
+      teacher: (profile && profile.displayName) || authUser.displayName || authUser.email,
       subject: sName,
       classCode: classCode,
       indicators: DEFAULT_INDICATORS,
@@ -412,23 +602,6 @@ export default function App() {
      } catch (err) { alert('Gagal menyimpan indikator: ' + err.message); }
   };
 
-  const handleMandiriLogin = (e) => {
-    e.preventDefault();
-    const name = mandiriNameInput.trim();
-    if (!name) return;
-    
-    setCurrentClass(null);
-    const newMandiriStudent = { id: 'mandiri-' + Date.now(), name };
-    setCurrentStudent(newMandiriStudent);
-    setUserRole('mandiri'); setSubmissions([]);
-    
-    // PERBAIKAN: Reset status Kanvas tiap kali login mode mandiri
-    setIsBypassAI(false); setIsApiValid(false);
-    session.set('PENA_VALIDATED', false); session.set('PENA_BYPASSED', false);
-
-    resetCanvasState(); setShowMandiriModal(false); setActiveTab('introSiswa'); 
-  };
-
   // PENDETEKSI PINDAH TAB (mencatat jumlah dan lama keluar halaman)
   useEffect(() => {
     if (activeTab !== 'workspace' || !currentStudent || !isKutipanLocked) return;
@@ -448,7 +621,7 @@ export default function App() {
 
   // 💾 DRAF OTOMATIS (tersimpan di perangkat murid, aman dari refresh)
   const draftKey = currentStudent
-    ? `PENA_DRAFT_${currentClass?.classCode || 'MANDIRI'}_${userRole === 'mandiri' ? currentStudent.name : (currentStudent.id || currentStudent.name)}`
+    ? `PENA_DRAFT_${currentClass?.classCode || 'KELAS'}_${currentStudent.id || currentStudent.name}`
     : null;
 
   useEffect(() => {
@@ -596,16 +769,16 @@ Instruksi Evaluasi:
     
     const totalChars = activeIndicatorsList.reduce((n, ind) => n + ((answers[ind.id] || '').length), 0);
     const submissionData = {
-      classCode: currentClass?.classCode || 'MANDIRI',
+      classCode: currentClass.classCode,
       studentName: currentStudent.name,
-      mode: userRole === 'mandiri' ? 'Mandiri (Privat)' : 'Tugas Kelas',
+      mode: 'Tugas Kelas',
       naskahText: naskahText, 
       deconstructionText: combinedDeconstruction.trim(),
       diagnosis, hasCopyPasted: isPasted, tabSwitches: tabSwitchCount,
       pasteChars, pasteCount, awaySeconds, totalChars,
       timestamp: new Date().toLocaleString(),
       timestampMs: Date.now(),
-      status: userRole === 'mandiri' ? 'Selesai (Auto)' : 'Pending Review Guru',
+      status: 'Pending Review Guru',
       teacherFeedback: ''
     };
 
@@ -637,6 +810,11 @@ Instruksi Evaluasi:
     e.preventDefault();
     const name = e.target.sName.value.trim();
     if(name) {
+      const batasSiswa = (TRUST_LIMITS[trustLevelNow] || TRUST_LIMITS.percobaan).siswa;
+      if (students.length >= batasSiswa) {
+        alert(`Kelas ini sudah mencapai batas ${batasSiswa} siswa untuk tingkat akun kamu.`);
+        return;
+      }
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
       await addDoc(collection(db, 'students'), { classCode: currentClass.classCode, name, pin });
       e.target.sName.value = ''; alert(`Berhasil! PIN otentikasi untuk ${name} adalah: ${pin}`);
@@ -665,7 +843,7 @@ Instruksi Evaluasi:
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Laporan_Evaluasi_PENA_${currentClass?.subject || 'Mandiri'}.csv`);
+    link.setAttribute("download", `Laporan_Evaluasi_PENA_${currentClass?.subject || 'Kelas'}.csv`);
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -704,7 +882,12 @@ Instruksi Evaluasi:
 
       <header style={styles.header} className="no-print">
         <h2 style={styles.logoText}>PENA Pilar 2</h2>
-        {userRole && <button style={styles.textBtn} onClick={doLogout}>Keluar Sesi</button>}
+        <div style={{display: 'flex', alignItems: 'center', gap: '14px'}}>
+          {userRole === 'guru' && authUser && (
+            <button type="button" onClick={openProfil} title="Profil Saya" style={{background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex'}}>{renderAvatar(profile, authUser, 30)}</button>
+          )}
+          {userRole && <button style={styles.textBtn} onClick={doLogout}>Keluar Sesi</button>}
+        </div>
       </header>
 
       {!userRole && activeTab === 'landing' && (
@@ -713,7 +896,7 @@ Instruksi Evaluasi:
             <span style={styles.badgeLabel}>Platform Elaborasi Nalar Aksara (PENA 1)</span>
             <h1 style={{...styles.titleHero}} className="responsive-title">Platform Pertanggungjawaban Nalar</h1>
             <p style={{...styles.subtitleHero}} className="responsive-subtitle">
-              Bermula sebagai alat uji orisinalitas di <b>Platform 5 (Buletin - Karya Murid)</b>, <b>PENA Pilar 2</b> kini berevolusi secara fundamental menjadi instrumen validasi nalar mandiri. Sistem ini siap membedah pemikiran siswa dan terintegrasi baik dalam ruang kelas maupun simulasi personal tanpa pengawasan Instruktur.
+              Bermula sebagai alat uji orisinalitas di <b>Platform 5 (Buletin - Karya Murid)</b>, <b>PENA Pilar 2</b> kini berevolusi secara fundamental menjadi instrumen validasi nalar mandiri. Sistem ini siap membedah pemikiran siswa dan terintegrasi dalam ruang kelas bersama Instruktur.
             </p>
           </div>
           
@@ -722,11 +905,6 @@ Instruksi Evaluasi:
               <div style={styles.iconCircle}>🎓</div>
               <h3 style={styles.menuTitle}>Ruang Siswa</h3>
               <p style={styles.menuDesc}>Masuk menggunakan kode akses kelas resmi dari instruktur untuk mengirim artefak nalar.</p>
-            </div>
-            <div style={styles.menuBox} onClick={() => setShowMandiriModal(true)}>
-              <div style={styles.iconCircle}>👤</div>
-              <h3 style={styles.menuTitle}>Mode Mandiri</h3>
-              <p style={styles.menuDesc}>Lakukan simulasi dan validasi pemikiran personal secara terisolasi tanpa guru.</p>
             </div>
             <div style={styles.menuBox} onClick={() => (authUser ? setShowGuruModal(true) : handleGuruGoogleLogin())}>
               <div style={styles.iconCircle}>👨‍🏫</div>
@@ -741,7 +919,14 @@ Instruksi Evaluasi:
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalCard} className="responsive-card">
             <h3 style={styles.modalTitle}>Kelas Saya</h3>
-            <p style={styles.modalDesc}>Masuk sebagai <b>{authUser.displayName || authUser.email}</b> ({authUser.email}).</p>
+            <div style={{display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px'}}>
+              {renderAvatar(profile, authUser, 44)}
+              <div style={{flex: 1, minWidth: 0}}>
+                <b>{(profile && profile.displayName) || authUser.displayName || authUser.email}</b><br/>
+                <span style={{fontSize: '12px', color: '#64748b'}}>{authUser.email} · {trustLabel(trustLevelNow)}</span>
+              </div>
+              <button type="button" style={{...styles.textBtn, fontSize: '13px'}} onClick={openProfil}>Profil</button>
+            </div>
             {myClasses.length === 0 ? (
               <p style={{color: '#64748b', fontSize: '14px', background: '#f8fafc', padding: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center'}}>Kamu belum punya kelas. Buat kelas pertamamu di bawah.</p>
             ) : (
@@ -798,28 +983,63 @@ Instruksi Evaluasi:
         </div>
       )}
 
-      {showMandiriModal && (
+      {showProfilModal && authUser && (
         <div style={styles.modalOverlay} className="no-print">
-          <div style={styles.modalCard} className="responsive-card">
-            <h3 style={styles.modalTitle}>Simulasi Mode Mandiri</h3>
-            <p style={styles.modalDesc}>Uji orisinalitas dan dekonstruksi nalar Anda secara pribadi tanpa campur tangan Instruktur.</p>
-            <form onSubmit={handleMandiriLogin}>
-              <label style={styles.label}>Nama Peserta Uji:</label>
-              <input type="text" placeholder="Masukkan nama Anda..." value={mandiriNameInput} onChange={(e) => setMandiriNameInput(e.target.value)} style={styles.input} required autoComplete="off" />
+          <div style={{...styles.modalCard, maxHeight: '90vh', overflowY: 'auto'}} className="responsive-card">
+            <h3 style={styles.modalTitle}>Profil Saya</h3>
+            <div style={{display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '18px'}}>
+              {renderAvatar({ displayName: profileForm.displayName, photoMode: profileForm.photoMode, photoData: profileForm.photoData }, authUser, 64)}
+              <div style={{minWidth: 0}}>
+                <b>{profileForm.displayName || '(belum ada nama)'}</b><br/>
+                <span style={{fontSize: '13px', color: '#64748b'}}>{authUser.email}</span><br/>
+                <span style={{fontSize: '12px', fontWeight: '700', color: '#0f172a'}}>{trustLabel(trustLevelNow)}</span>
+              </div>
+            </div>
+            <form onSubmit={handleSaveProfile} autoComplete="off">
+              <label style={styles.label}>Foto profil:</label>
+              <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px'}}>
+                <button type="button" style={profileForm.photoMode === 'google' ? styles.navActive : styles.navBtn} onClick={() => setProfileForm(f => ({...f, photoMode: 'google'}))}>Foto Google</button>
+                <button type="button" style={profileForm.photoMode === 'initials' ? styles.navActive : styles.navBtn} onClick={() => setProfileForm(f => ({...f, photoMode: 'initials'}))}>Inisial</button>
+                <label style={{...(profileForm.photoMode === 'upload' ? styles.navActive : styles.navBtn), cursor: 'pointer', display: 'inline-block'}}>
+                  Unggah foto
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoFile} style={{display: 'none'}} />
+                </label>
+              </div>
+              <label style={styles.label}>Nama tampilan (dilihat murid):</label>
+              <input type="text" value={profileForm.displayName} onChange={(e) => setProfileForm(f => ({...f, displayName: e.target.value}))} style={styles.input} maxLength={60} required autoComplete="off" />
+              <label style={styles.label}>Sekolah:</label>
+              <input type="text" value={profileForm.school} onChange={(e) => setProfileForm(f => ({...f, school: e.target.value}))} style={styles.input} maxLength={80} placeholder="Nama sekolah (opsional)" autoComplete="off" />
+              <label style={styles.label}>Jenjang:</label>
+              <select value={profileForm.jenjang} onChange={(e) => setProfileForm(f => ({...f, jenjang: e.target.value}))} style={styles.input}>
+                <option value="">Pilih jenjang (opsional)</option>
+                {JENJANG_OPTIONS.map(j => <option key={j} value={j}>{j}</option>)}
+              </select>
+              <label style={styles.label}>Mata pelajaran utama:</label>
+              <input type="text" value={profileForm.mapel} onChange={(e) => setProfileForm(f => ({...f, mapel: e.target.value}))} style={styles.input} maxLength={60} placeholder="Contoh: Bahasa Indonesia (opsional)" autoComplete="off" />
               <div style={styles.modalActions}>
-                <button type="submit" style={styles.btnPrimary}>Mulai Eksekusi Mandiri</button>
-                <button type="button" style={styles.btnSecondary} onClick={() => setShowMandiriModal(false)}>Batal</button>
+                <button type="submit" style={styles.btnPrimary} disabled={isSavingProfile}>{isSavingProfile ? 'Menyimpan...' : 'Simpan'}</button>
+                <button type="button" style={styles.btnSecondary} onClick={() => setShowProfilModal(false)}>Tutup</button>
               </div>
             </form>
+            <div style={{marginTop: '20px', padding: '14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '13px', color: '#475569', lineHeight: '1.6'}}>
+              <b>Tingkat akun: {trustLabel(trustLevelNow)}</b><br/>
+              Batas saat ini: maksimal {(TRUST_LIMITS[trustLevelNow] || TRUST_LIMITS.percobaan).kelas} kelas dan {(TRUST_LIMITS[trustLevelNow] || TRUST_LIMITS.percobaan).siswa} siswa per kelas.
+              {trustLevelNow !== 'terverifikasi' && (<><br/>Untuk naik ke Terverifikasi, masuk dengan akun email guru belajar.id, atau hubungi admin untuk kode undangan.</>)}
+            </div>
+            <div style={{marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #fecaca'}}>
+              <button type="button" style={{background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontWeight: '600', fontSize: '13px', textDecoration: 'underline', padding: 0}} onClick={handleDeleteAccount} disabled={isDeletingAccount}>
+                {isDeletingAccount ? 'Menghapus...' : 'Hapus akun dan semua data saya'}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {userRole && (
         <nav style={{...styles.navBar}} className="no-print responsive-nav">
-          {(userRole === 'siswa' || userRole === 'mandiri') && (
+          {userRole === 'siswa' && (
             <>
-              <span style={styles.navBadge}>{userRole === 'mandiri' ? 'Mode Privat' : currentClass?.subject}</span>
+              <span style={styles.navBadge}>{currentClass?.subject}</span>
               <button style={activeTab === 'introSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('introSiswa')}>Pengaturan AI</button>
               
               <button 
@@ -844,6 +1064,7 @@ Instruksi Evaluasi:
               <button style={activeTab === 'guruDashboard' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruDashboard')}>Dasbor Evaluasi</button>
               <button style={activeTab === 'guruSiswa' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruSiswa')}>Manajemen Peserta</button>
               <button style={activeTab === 'guruIndikator' ? styles.navActive : styles.navBtn} onClick={() => setActiveTab('guruIndikator')}>Manajemen Indikator</button>
+              <button style={styles.navBtn} onClick={openProfil}>Profil Saya</button>
               <button style={styles.navBtn} onClick={handleGantiKelasGuru}>Ganti Kelas</button>
             </>
           )}
@@ -851,7 +1072,7 @@ Instruksi Evaluasi:
       )}
 
       <main style={styles.main}>
-        {(userRole === 'siswa' || userRole === 'mandiri') && currentStudent && (
+        {userRole === 'siswa' && currentStudent && (
           <>
             {activeTab === 'introSiswa' && (
               <div style={styles.card} className="no-print responsive-card">
